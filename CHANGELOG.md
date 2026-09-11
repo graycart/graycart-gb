@@ -10,11 +10,14 @@ workflow fails.
 
 ## Unreleased
 
+## 0.11.4
+
 - Audio: map stereo PCM into multi-channel WASAPI frames (L/R + silence) instead of
   draining one ring sample per host channel — fixes choppy/robotic output on
   surround defaults such as Logitech PRO X 2 LIGHTSPEED. Prefer stereo/mono when
   negotiating configs; request ~20 ms device periods when honored; raise the soft
-  queue target to ~4 display frames.
+  queue target to ~4 display frames
+  ([#21](https://github.com/graycart/graycart-gb/pull/21)).
 
 ## 0.11.3
 
