@@ -232,8 +232,30 @@ fn try_host_with_pref(
 /// endpoints often reject an arbitrary max rate even when the range advertises it).
 const PREFERRED_RATES_HZ: &[u32] = &[48_000, 44_100, 96_000, 32_000, 22_050, 16_000];
 
+pub(crate) fn channel_preference(channels: u16) -> u8 {
+    // Stereo first (our ring is L/R), then mono, then surround/multi.
+    // Do not let a 5.1/7.1 WASAPI default win before a working stereo mix —
+    // gaming headsets (e.g. PRO X 2 LIGHTSPEED) often advertise surround first.
+    match channels {
+        2 => 0,
+        1 => 1,
+        _ => 2,
+    }
+}
+
+pub(crate) fn rate_preference(hz: u32) -> u8 {
+    PREFERRED_RATES_HZ
+        .iter()
+        .position(|&r| r == hz)
+        .map(|i| i as u8)
+        .unwrap_or(PREFERRED_RATES_HZ.len() as u8)
+}
+
 /// Expand supported ranges into concrete configs: prefer ≤2ch, then common rates.
-fn expand_supported_configs(
+///
+/// Multi-channel defaults are still attempted (stream open may require them) but
+/// only after stereo/mono candidates, so surround endpoints do not starve stereo.
+pub(crate) fn expand_supported_configs(
     default: Option<SupportedStreamConfig>,
     ranges: impl IntoIterator<Item = SupportedStreamConfigRange>,
 ) -> Vec<SupportedStreamConfig> {
@@ -253,20 +275,7 @@ fn expand_supported_configs(
         push_unique(c);
     }
 
-    let mut ordered_ranges = ranges;
-    ordered_ranges.sort_by_key(|r| {
-        let ch = r.channels();
-        // Prefer stereo, then mono, then everything else.
-        if ch == 2 {
-            0u8
-        } else if ch == 1 {
-            1
-        } else {
-            2
-        }
-    });
-
-    for range in ordered_ranges {
+    for range in ranges {
         for &hz in PREFERRED_RATES_HZ {
             if let Some(cfg) = range.try_with_sample_rate(SampleRate(hz)) {
                 push_unique(cfg);
@@ -276,6 +285,14 @@ fn expand_supported_configs(
         push_unique(range.with_sample_rate(min));
         push_unique(range.with_max_sample_rate());
     }
+
+    configs.sort_by_key(|c| {
+        (
+            channel_preference(c.channels()),
+            rate_preference(c.sample_rate().0),
+            format!("{:?}", c.sample_format()),
+        )
+    });
     configs
 }
 
@@ -320,23 +337,44 @@ fn try_config(
     // Keep the channel count from the negotiated SupportedStreamConfig.
     // Forcing stereo on a multi-channel WASAPI mix format is a common
     // "requested stream configuration is not supported" failure on Windows.
-    let config: StreamConfig = supported.into();
+    // Callbacks map our stereo ring into N-channel frames (see fill_interleaved).
+    let mut config: StreamConfig = supported.into();
     let channels = config.channels;
 
-    let target_frames = ((sample_rate as usize) / 60).saturating_mul(3).max(1024);
+    // Soft target ~4 display frames (~67 ms @ 48 kHz): extra margin for USB /
+    // wireless headsets whose WASAPI period jitter exceeds the old 3-frame target.
+    let target_frames = ((sample_rate as usize) / 60).saturating_mul(4).max(1024);
     let max_frames = ((sample_rate as usize) * 3 / 20).max(target_frames * 2);
     let capacity_samples = max_frames * 2;
+
+    // Prefer ~20 ms device periods when the host honors Fixed; fall back below.
+    let preferred_period = (sample_rate / 50).max(256);
+    config.buffer_size = cpal::BufferSize::Fixed(preferred_period);
 
     let (producer, consumer) = RingBuffer::<f32>::new(capacity_samples);
     let consumer = Arc::new(Mutex::new(consumer));
     let counters = Arc::new(SharedCounters::new());
-    let stream = build_stream(
+    let stream = match build_stream(
         device,
         &config,
         sample_format,
+        channels,
         Arc::clone(&consumer),
         Arc::clone(&counters),
-    )?;
+    ) {
+        Ok(s) => s,
+        Err(_) => {
+            config.buffer_size = cpal::BufferSize::Default;
+            build_stream(
+                device,
+                &config,
+                sample_format,
+                channels,
+                Arc::clone(&consumer),
+                Arc::clone(&counters),
+            )?
+        }
+    };
 
     stream
         .play()
@@ -370,9 +408,11 @@ fn build_stream(
     device: &Device,
     config: &StreamConfig,
     sample_format: SampleFormat,
+    channels: u16,
     consumer: Arc<Mutex<rtrb::Consumer<f32>>>,
     counters: Arc<SharedCounters>,
 ) -> Result<Stream, String> {
+    let channels = channels as usize;
     let result = match sample_format {
         SampleFormat::F32 => {
             let consumer = Arc::clone(&consumer);
@@ -381,7 +421,7 @@ fn build_stream(
                 config,
                 move |data: &mut [f32], _| {
                     if let Ok(mut ring) = consumer.lock() {
-                        fill_f32(data, &mut ring, &ctr);
+                        fill_f32(data, channels, &mut ring, &ctr);
                     }
                 },
                 |e| eprintln!("audio stream error: {e}"),
@@ -395,7 +435,7 @@ fn build_stream(
                 config,
                 move |data: &mut [i16], _| {
                     if let Ok(mut ring) = consumer.lock() {
-                        fill_i16(data, &mut ring, &ctr);
+                        fill_i16(data, channels, &mut ring, &ctr);
                     }
                 },
                 |e| eprintln!("audio stream error: {e}"),
@@ -409,7 +449,7 @@ fn build_stream(
                 config,
                 move |data: &mut [i32], _| {
                     if let Ok(mut ring) = consumer.lock() {
-                        fill_i32(data, &mut ring, &ctr);
+                        fill_i32(data, channels, &mut ring, &ctr);
                     }
                 },
                 |e| eprintln!("audio stream error: {e}"),
@@ -423,7 +463,7 @@ fn build_stream(
                 config,
                 move |data: &mut [u16], _| {
                     if let Ok(mut ring) = consumer.lock() {
-                        fill_u16(data, &mut ring, &ctr);
+                        fill_u16(data, channels, &mut ring, &ctr);
                     }
                 },
                 |e| eprintln!("audio stream error: {e}"),
@@ -437,7 +477,7 @@ fn build_stream(
                 config,
                 move |data: &mut [f64], _| {
                     if let Ok(mut ring) = consumer.lock() {
-                        fill_f64(data, &mut ring, &ctr);
+                        fill_f64(data, channels, &mut ring, &ctr);
                     }
                 },
                 |e| eprintln!("audio stream error: {e}"),

@@ -45,12 +45,12 @@ pub struct AudioStats {
 }
 
 pub(crate) struct SharedCounters {
-    produced: AtomicU64,
-    consumed: AtomicU64,
-    underrun_events: AtomicU64,
-    missing_samples: AtomicU64,
-    dropped: AtomicU64,
-    callbacks: AtomicU64,
+    pub(crate) produced: AtomicU64,
+    pub(crate) consumed: AtomicU64,
+    pub(crate) underrun_events: AtomicU64,
+    pub(crate) missing_samples: AtomicU64,
+    pub(crate) dropped: AtomicU64,
+    pub(crate) callbacks: AtomicU64,
 }
 
 impl SharedCounters {
@@ -86,7 +86,7 @@ pub struct AudioOut {
     pub(crate) started: Instant,
     /// Device sample rate (APU should match via [`graycart::Apu::set_output_sample_rate`]).
     pub sample_rate: u32,
-    /// Soft target occupancy (~3 display frames).
+    /// Soft target occupancy (~4 display frames).
     pub target_frames: usize,
     pub device_name: String,
     pub host_name: String,
@@ -235,107 +235,141 @@ impl AudioOut {
     }
 }
 
-pub(crate) fn fill_f32(out: &mut [f32], consumer: &mut Consumer<f32>, counters: &SharedCounters) {
+/// Pop stereo ring frames into an interleaved host callback buffer.
+///
+/// Host layouts are `[ch0, ch1, …, chN) × frames`. The ring stores L/R pairs.
+/// For N≥2 we write L→ch0, R→ch1 and silence the rest; for mono we downmix.
+/// Treating every host sample as a ring pop (pre-#21) drains a 5.1/7.1 device
+/// 3–4× too fast and yields robotic underruns on surround WASAPI endpoints.
+pub(crate) fn fill_interleaved<T>(
+    out: &mut [T],
+    channels: usize,
+    consumer: &mut Consumer<f32>,
+    counters: &SharedCounters,
+    encode: impl Fn(f32) -> T,
+    silence: T,
+) where
+    T: Copy,
+{
     counters.callbacks.fetch_add(1, Ordering::Relaxed);
-    let mut consumed = 0u64;
-    let mut missing = 0u64;
-    for sample in out.iter_mut() {
-        match consumer.pop() {
-            Ok(v) => {
-                *sample = v;
-                consumed += 1;
+    let channels = channels.max(1);
+    let mut frames_ok = 0u64;
+    let mut frames_missing = 0u64;
+    for frame in out.chunks_exact_mut(channels) {
+        match (consumer.pop(), consumer.pop()) {
+            (Ok(l), Ok(r)) => {
+                write_host_frame(frame, l, r, &encode, silence);
+                frames_ok += 1;
             }
-            Err(_) => {
-                *sample = 0.0;
-                missing += 1;
+            (Ok(l), Err(_)) => {
+                // Odd leftover mono sample — treat as underrun for the frame.
+                write_host_frame(frame, l, l, &encode, silence);
+                frames_missing += 1;
+            }
+            (Err(_), _) => {
+                for s in frame.iter_mut() {
+                    *s = silence;
+                }
+                frames_missing += 1;
             }
         }
     }
-    finish_fill(counters, consumed, missing);
+    // Any trailing partial frame (mis-sized buffer) stays untouched / silent.
+    finish_fill(counters, frames_ok, frames_missing);
 }
 
-pub(crate) fn fill_i16(out: &mut [i16], consumer: &mut Consumer<f32>, counters: &SharedCounters) {
-    counters.callbacks.fetch_add(1, Ordering::Relaxed);
-    let mut consumed = 0u64;
-    let mut missing = 0u64;
-    for sample in out.iter_mut() {
-        match consumer.pop() {
-            Ok(v) => {
-                *sample = (v.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
-                consumed += 1;
-            }
-            Err(_) => {
-                *sample = 0;
-                missing += 1;
+fn write_host_frame<T: Copy>(
+    frame: &mut [T],
+    left: f32,
+    right: f32,
+    encode: &impl Fn(f32) -> T,
+    silence: T,
+) {
+    match frame.len() {
+        0 => {}
+        1 => frame[0] = encode((left + right) * 0.5),
+        _ => {
+            frame[0] = encode(left);
+            frame[1] = encode(right);
+            for s in &mut frame[2..] {
+                *s = silence;
             }
         }
     }
-    finish_fill(counters, consumed, missing);
 }
 
-pub(crate) fn fill_i32(out: &mut [i32], consumer: &mut Consumer<f32>, counters: &SharedCounters) {
-    counters.callbacks.fetch_add(1, Ordering::Relaxed);
-    let mut consumed = 0u64;
-    let mut missing = 0u64;
-    for sample in out.iter_mut() {
-        match consumer.pop() {
-            Ok(v) => {
-                *sample = (v.clamp(-1.0, 1.0) * i32::MAX as f32) as i32;
-                consumed += 1;
-            }
-            Err(_) => {
-                *sample = 0;
-                missing += 1;
-            }
-        }
-    }
-    finish_fill(counters, consumed, missing);
+pub(crate) fn fill_f32(
+    out: &mut [f32],
+    channels: usize,
+    consumer: &mut Consumer<f32>,
+    counters: &SharedCounters,
+) {
+    fill_interleaved(out, channels, consumer, counters, |v| v, 0.0);
 }
 
-pub(crate) fn fill_u16(out: &mut [u16], consumer: &mut Consumer<f32>, counters: &SharedCounters) {
-    counters.callbacks.fetch_add(1, Ordering::Relaxed);
-    let mut consumed = 0u64;
-    let mut missing = 0u64;
-    for sample in out.iter_mut() {
-        match consumer.pop() {
-            Ok(v) => {
-                *sample = ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * f32::from(u16::MAX)) as u16;
-                consumed += 1;
-            }
-            Err(_) => {
-                *sample = u16::MAX / 2;
-                missing += 1;
-            }
-        }
-    }
-    finish_fill(counters, consumed, missing);
+pub(crate) fn fill_i16(
+    out: &mut [i16],
+    channels: usize,
+    consumer: &mut Consumer<f32>,
+    counters: &SharedCounters,
+) {
+    fill_interleaved(
+        out,
+        channels,
+        consumer,
+        counters,
+        |v| (v.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16,
+        0,
+    );
 }
 
-pub(crate) fn fill_f64(out: &mut [f64], consumer: &mut Consumer<f32>, counters: &SharedCounters) {
-    counters.callbacks.fetch_add(1, Ordering::Relaxed);
-    let mut consumed = 0u64;
-    let mut missing = 0u64;
-    for sample in out.iter_mut() {
-        match consumer.pop() {
-            Ok(v) => {
-                *sample = f64::from(v);
-                consumed += 1;
-            }
-            Err(_) => {
-                *sample = 0.0;
-                missing += 1;
-            }
-        }
-    }
-    finish_fill(counters, consumed, missing);
+pub(crate) fn fill_i32(
+    out: &mut [i32],
+    channels: usize,
+    consumer: &mut Consumer<f32>,
+    counters: &SharedCounters,
+) {
+    fill_interleaved(
+        out,
+        channels,
+        consumer,
+        counters,
+        |v| (v.clamp(-1.0, 1.0) * i32::MAX as f32) as i32,
+        0,
+    );
 }
 
-fn finish_fill(counters: &SharedCounters, consumed: u64, missing: u64) {
-    counters.consumed.fetch_add(consumed / 2, Ordering::Relaxed);
-    if missing > 0 {
+pub(crate) fn fill_u16(
+    out: &mut [u16],
+    channels: usize,
+    consumer: &mut Consumer<f32>,
+    counters: &SharedCounters,
+) {
+    fill_interleaved(
+        out,
+        channels,
+        consumer,
+        counters,
+        |v| ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * f32::from(u16::MAX)) as u16,
+        u16::MAX / 2,
+    );
+}
+
+pub(crate) fn fill_f64(
+    out: &mut [f64],
+    channels: usize,
+    consumer: &mut Consumer<f32>,
+    counters: &SharedCounters,
+) {
+    fill_interleaved(out, channels, consumer, counters, f64::from, 0.0);
+}
+
+fn finish_fill(counters: &SharedCounters, frames_ok: u64, frames_missing: u64) {
+    counters.consumed.fetch_add(frames_ok, Ordering::Relaxed);
+    if frames_missing > 0 {
         counters
             .missing_samples
-            .fetch_add(missing / 2, Ordering::Relaxed);
+            .fetch_add(frames_missing, Ordering::Relaxed);
         counters.underrun_events.fetch_add(1, Ordering::Relaxed);
     }
 }
