@@ -31,6 +31,9 @@ pub enum UiAction {
     SetFfSpeed(SpeedPreset),
     SetHardwarePref(graycart::HostHardwarePref),
     SetAudioOutput(crate::frontend::audio::AudioDevicePref),
+    ReportBug,
+    RequestFeature,
+    ConfigureGithubToken,
 }
 
 #[derive(Debug, Default)]
@@ -279,6 +282,19 @@ pub fn menu_bar(
                 super::super::brand::NAME,
                 super::super::brand::crate_version()
             ));
+            ui.separator();
+            if ui.button("Report bug…").clicked() {
+                actions.push(UiAction::ReportBug);
+                ui.close();
+            }
+            if ui.button("Request feature…").clicked() {
+                actions.push(UiAction::RequestFeature);
+                ui.close();
+            }
+            if ui.button("GitHub token…").clicked() {
+                actions.push(UiAction::ConfigureGithubToken);
+                ui.close();
+            }
         });
 
         ui.menu_button("Debug", |ui| {

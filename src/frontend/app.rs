@@ -19,6 +19,10 @@ use super::input::{HostCommand, HostCommandMap, InputFrontend, PollResult};
 use super::launch::{LaunchRom, Verbosity, cold_launch_rom_attached};
 use super::pace::{FramePacer, target_fps};
 use super::playback::{on_main_window_focus_loss, toggle_paused};
+use super::report::{
+    ConsentOutcome, collect_bug_defaults, crash_dir, install_panic_hook, load_pending,
+    write_fault_envelope,
+};
 use super::rom::{OpenedRom, is_rom_path, open_rom_file, rom_dialog_extensions};
 use super::runtime::{EmuCommand, EmulationRuntime, RuntimeConfig};
 use super::screenshot::write_presented_png;
@@ -46,6 +50,7 @@ pub fn run(
     unthrottled: bool,
     hardware_cli: Option<graycart::HostHardwarePref>,
 ) -> Result<(), String> {
+    install_panic_hook();
     let event_loop = EventLoop::new().map_err(|e| e.to_string())?;
 
     let mut settings = FrontendSettings::load();
@@ -121,6 +126,7 @@ pub fn run(
         aux_focused: false,
         status_toast: None,
         status_toast_until: None,
+        pending_crash_checked: false,
     };
 
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
@@ -172,6 +178,7 @@ struct App {
     aux_focused: bool,
     status_toast: Option<String>,
     status_toast_until: Option<Instant>,
+    pending_crash_checked: bool,
 }
 
 fn exe_dir() -> Option<PathBuf> {
@@ -237,6 +244,7 @@ impl App {
         if !self.ready {
             return;
         }
+        self.maybe_prompt_pending_crash();
         self.sync_status_toast();
         self.dispatch_ui_actions(event_loop);
         self.sync_runtime_settings();
@@ -468,7 +476,73 @@ impl App {
 
         if let Some(fault) = packet.fault {
             eprintln!("{fault}");
+            let fields = collect_bug_defaults(
+                &self.settings,
+                &self.cached_title,
+                &self.cached_rom_path.to_string_lossy(),
+                self.boot_mode(),
+                &fault,
+                "Emulation fault (FaultReport)",
+            );
+            if let Err(e) = write_fault_envelope(&fault, &fields) {
+                eprintln!("crash envelope: {e}");
+            }
+            if let Some(gui) = self.gui.as_mut() {
+                if let Some(dir) = crash_dir()
+                    && let Some((meta, md)) = load_pending(&dir)
+                {
+                    gui.report.begin_crash_consent(meta, md, true);
+                } else {
+                    // Still quit if we couldn't open consent UI state.
+                    self.exit_error = Some(fault);
+                    self.quit(event_loop);
+                }
+            } else {
+                self.exit_error = Some(fault);
+                self.quit(event_loop);
+            }
+        }
+    }
+
+    fn maybe_prompt_pending_crash(&mut self) {
+        if self.pending_crash_checked {
+            return;
+        }
+        self.pending_crash_checked = true;
+        let Some(gui) = self.gui.as_mut() else {
+            return;
+        };
+        if gui.report.crash_consent.is_some() {
+            return;
+        }
+        let Some(dir) = crash_dir() else {
+            return;
+        };
+        if let Some((meta, md)) = load_pending(&dir) {
+            // Next-launch path for panics (and unanswered fault envelopes).
+            gui.report.begin_crash_consent(meta, md, false);
+        }
+    }
+
+    fn handle_report_consent(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(gui) = self.gui.as_mut() else {
+            return;
+        };
+        let quit_after = gui.report.quit_after_consent;
+        let status = gui.report.last_status.take();
+        let outcome = gui.take_consent_outcome();
+        if quit_after && matches!(outcome, ConsentOutcome::Sent | ConsentOutcome::Dismissed) {
+            if let Some(g) = self.gui.as_mut() {
+                g.report.quit_after_consent = false;
+            }
+            if let Some(msg) = status {
+                self.set_status_toast(msg);
+            }
             self.quit(event_loop);
+            return;
+        }
+        if let Some(msg) = status {
+            self.set_status_toast(msg);
         }
     }
 
@@ -549,6 +623,7 @@ impl App {
                 return;
             }
         };
+        self.handle_report_consent(event_loop);
         let render_time = if profile_detail {
             framebuffer + egui + gpu
         } else {
@@ -870,7 +945,37 @@ impl App {
                 UiAction::TakeScreenshot => self.take_screenshot(),
                 UiAction::InstallBootRom => self.install_boot_rom_from_dialog(),
                 UiAction::ClearBootRom => self.clear_installed_boot_rom(),
+                UiAction::ReportBug => self.open_report_bug(),
+                UiAction::RequestFeature => {
+                    if let Some(g) = self.gui.as_mut() {
+                        g.report.open_feature();
+                    }
+                }
+                UiAction::ConfigureGithubToken => {
+                    if let Some(g) = self.gui.as_mut() {
+                        g.report.open_token_dialog(&self.settings);
+                    }
+                }
             }
+        }
+    }
+
+    fn open_report_bug(&mut self) {
+        let diagnostics = self
+            .diagnostics
+            .last_report
+            .clone()
+            .unwrap_or_else(|| "none".into());
+        let fields = collect_bug_defaults(
+            &self.settings,
+            &self.cached_title,
+            &self.cached_rom_path.to_string_lossy(),
+            self.boot_mode(),
+            &diagnostics,
+            "",
+        );
+        if let Some(g) = self.gui.as_mut() {
+            g.report.open_bug(fields);
         }
     }
 

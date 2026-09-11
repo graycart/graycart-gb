@@ -126,6 +126,9 @@ pub struct FrontendSettings {
     pub hardware_pref: HostHardwarePref,
     #[serde(default)]
     pub audio_output: AudioDevicePref,
+    /// User fine-grained GitHub PAT for in-app issue filing (Issues write on graycart-gb).
+    #[serde(default)]
+    pub github_pat: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -158,6 +161,8 @@ struct FrontendSettingsDe {
     hardware_pref: HostHardwarePref,
     #[serde(default)]
     audio_output: AudioDevicePref,
+    #[serde(default)]
+    github_pat: String,
 }
 
 impl From<FrontendSettingsDe> for FrontendSettings {
@@ -187,6 +192,7 @@ impl From<FrontendSettingsDe> for FrontendSettings {
             pause_when_unfocused: de.pause_when_unfocused,
             hardware_pref: de.hardware_pref,
             audio_output: de.audio_output,
+            github_pat: de.github_pat,
         }
     }
 }
@@ -259,6 +265,7 @@ impl Default for FrontendSettings {
             pause_when_unfocused: false,
             hardware_pref: HostHardwarePref::Automatic,
             audio_output: AudioDevicePref::SystemDefault,
+            github_pat: String::new(),
         }
     }
 }

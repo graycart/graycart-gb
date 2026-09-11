@@ -18,6 +18,7 @@ use winit::window::Window;
 
 use super::fonts::install_departure_mono;
 use super::playback::SpeedPreset;
+use super::report::{ConsentOutcome, ReportUi, show as show_report_ui};
 use super::settings::FrontendSettings;
 use super::video::{DisplayMode, game_image_size};
 use graycart::{SCREEN_HEIGHT, SCREEN_WIDTH};
@@ -34,7 +35,9 @@ pub struct Gui {
     textures: TexturesDelta,
     game_texture: Option<TextureHandle>,
     pub runtime: RuntimeUi,
+    pub report: ReportUi,
     pending: Vec<UiAction>,
+    last_consent: ConsentOutcome,
 }
 
 impl Gui {
@@ -74,13 +77,19 @@ impl Gui {
             textures: TexturesDelta::default(),
             game_texture: None,
             runtime: RuntimeUi::default(),
+            report: ReportUi::default(),
             pending: Vec::new(),
+            last_consent: ConsentOutcome::Open,
         }
     }
 
     /// True only when a [`egui::TextEdit`] (or IME text capture) should steal keys.
     pub fn text_input_owns_keyboard(&self) -> bool {
         self.egui_ctx.text_edit_focused()
+    }
+
+    pub fn take_consent_outcome(&mut self) -> ConsentOutcome {
+        std::mem::replace(&mut self.last_consent, ConsentOutcome::Open)
     }
 
     /// Close the palette editor on Escape (Configure Controls is a native window).
@@ -123,6 +132,8 @@ impl Gui {
         let raw_input = self.egui_state.take_egui_input(window);
         let mut actions = Vec::new();
         let mut runtime = std::mem::take(&mut self.runtime);
+        let mut report = std::mem::take(&mut self.report);
+        let mut consent = ConsentOutcome::Open;
         let rom_loaded = runtime.rom_loaded;
         let integer_scaling = settings.integer_scaling;
         let display_mode = settings.display_mode;
@@ -161,8 +172,12 @@ impl Gui {
                     }
                     playback_overlay(ui.ctx(), &runtime);
                 });
+
+            consent = show_report_ui(ui.ctx(), settings, &mut report);
         });
         self.runtime = runtime;
+        self.report = report;
+        self.last_consent = consent;
         self.pending.append(&mut actions);
         self.textures.append(output.textures_delta);
         self.egui_state

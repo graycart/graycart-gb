@@ -16,6 +16,7 @@ mod input;
 mod launch;
 mod pace;
 mod playback;
+mod report;
 mod rewind;
 mod rom;
 mod runtime;
