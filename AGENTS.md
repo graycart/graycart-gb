@@ -1,6 +1,6 @@
 # Agent guidelines — Graycart (`graycart-gb`)
 
-How to change this emulator. Product name **Graycart**; crate/binary **`graycart`**. Family: [graycart](https://github.com/graycart/graycart), tests [graycart-tests](https://github.com/graycart/graycart-tests), GBA later.
+How to change this emulator. Product name **Graycart**; crate/binary **`graycart`**. Family: [graycart](https://github.com/graycart/graycart), GBA later.
 
 ## Hardware-first
 
@@ -27,7 +27,7 @@ If something has its own state, rules, tests, or lifecycle, it gets its own modu
 
 CPU → Bus → Cartridge → MBC; Timer / PPU / APU / Joypad / `hw/` (KEY1, clock, HDMA) stay distinct. VRAM banks in `ppu/vram.rs`, WRAM in `bus/wram.rs`, CRAM in `ppu/cram.rs`.
 
-Tests: `src/<module>/tests.rs` via `#[cfg(test)] mod tests;` — not inline in production files. Integration under `tests/` uses the public API. ROM harnesses live under `tests/roms/` until they move to `graycart-tests`.
+Tests: `src/<module>/tests.rs` via `#[cfg(test)] mod tests;` — not inline in production files. Integration under `tests/` uses the public API. ROM harnesses live under `tests/roms/` with fixtures in `tests/fixtures/`.
 
 ## Parallelism
 

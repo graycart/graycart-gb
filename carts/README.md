@@ -18,4 +18,4 @@ Typical names the ignored commercial-smoke harness looks for (first match wins p
 
 You can also point harnesses at another folder with `GRAYCART_CARTS`.
 
-Conformance fixtures (Blargg / Mooneye) live under `tests/fixtures/` until they move to [`graycart-tests`](https://github.com/graycart/graycart-tests).
+Conformance fixtures (Blargg / Mooneye) live under `tests/fixtures/`.

@@ -28,7 +28,7 @@ Headless:
 cargo run --release -- --frames 120 path/to/game.gb
 ```
 
-`cargo test` is **Rust unit and integration tests only** (no test-ROM download). ROM matrices are still invoked with `cargo test --test roms … -- --ignored` until they move to [`graycart-tests`](https://github.com/graycart/graycart-tests).
+`cargo test` is **Rust unit and integration tests only** (no test-ROM download). ROM matrices stay in this repo: `cargo test --test roms … -- --ignored`.
 
 Required before a change is done:
 

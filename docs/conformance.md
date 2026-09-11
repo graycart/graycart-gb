@@ -4,9 +4,9 @@
 
 Rust unit tests (`src/**/tests.rs`) and small integration tests. **No ROM download.** This is what CI runs and what a clone must pass.
 
-## ROM harnesses (temporary in-tree)
+## ROM harnesses
 
-Until [`graycart-tests`](https://github.com/graycart/graycart-tests) owns Blargg / Mooneye / Acid2 via pinned fetch:
+Blargg / Mooneye (and later Acid2) are in-tree fixtures plus ignored ROM harnesses:
 
 ```bash
 cargo test --test roms blargg_cpu_instrs_matrix -- --ignored --nocapture
@@ -25,11 +25,4 @@ cargo test --test roms commercial_rom_smoke_matrix -- --ignored --nocapture
 
 Missing `carts/*.gb` (or `GRAYCART_CARTS`) skips those titles.
 
-## Planned contract
-
-| Command | Meaning |
-|---------|---------|
-| `cargo test` | Code-owned tests (clone-and-go) |
-| `graycart-test run --suite …` | External suite (future); missing suite is not a unit-test failure |
-
-Acid2 is not vendored here yet; it will live in `graycart-tests`.
+Acid2 is not vendored yet.

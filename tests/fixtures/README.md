@@ -1,7 +1,6 @@
 # Test ROM fixtures
 
-Commercial carts stay under `carts/` (local only, gitignored). Conformance ROMs live here and
-are tracked until they move to `graycart-tests`.
+Commercial carts stay under `carts/` (local only, gitignored). Conformance ROMs live here.
 
 ```text
 tests/fixtures/
