@@ -1,0 +1,128 @@
+name: Bug report
+description: Report incorrect emulation, a crash, or host/UI failure in Graycart.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Fill every field you can — Stream F / in-app filing mirrors these `id`s.
+
+        Do **not** attach commercial ROMs, `.sav` / `.gcs*` files, or Nintendo boot firmware.
+        ROM **title/header** and basename only; scrub username-bearing paths.
+
+  - type: input
+    id: version
+    attributes:
+      label: Graycart version
+      description: Product version from the window title, About dialog, or `Cargo.toml` (e.g. `0.11.1`).
+      placeholder: "0.11.1"
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / SHA
+      description: Git commit if known (`GRAYCART_GIT_SHA`, `git rev-parse HEAD`, or release build metadata). Use `unknown` for opaque release builds.
+      placeholder: "abc1234 or unknown"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: Host OS and arch (e.g. `Windows 11 x86_64`, `macOS 15 arm64`, `Ubuntu 24.04 x86_64`).
+      placeholder: "OS version + arch"
+    validations:
+      required: true
+
+  - type: input
+    id: rom_title
+    attributes:
+      label: ROM title / header
+      description: Cartridge title from the ROM header (not the full filesystem path). Basename only if that is all you have.
+      placeholder: "POKEMON RED"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hardware_mode
+    attributes:
+      label: Hardware mode
+      description: Emulation → Hardware setting (or `--hardware`) when the bug happened.
+      options:
+        - Automatic
+        - Game Boy
+        - Game Boy Color
+        - Unknown / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: boot_mode
+    attributes:
+      label: Boot mode
+      description: Fast boot (default / skip boot) vs real boot ROM overlay.
+      options:
+        - Fast (skip / post-boot state)
+        - Boot ROM
+        - Unknown / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: audio
+    attributes:
+      label: Audio backend / device
+      description: Short label only (e.g. `System Default`, `WASAPI …`, `Core Audio …`, `offline`). Not a full device enumeration dump.
+      placeholder: "System Default"
+    validations:
+      required: true
+
+  - type: input
+    id: controller
+    attributes:
+      label: Controller / input
+      description: Keyboard defaults, remapped controls, or gamepad/backend summary if relevant.
+      placeholder: "Keyboard (defaults) / gamepad name"
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic capture
+      description: Paste F9 / Copy report text, panic/`FaultReport` output, or say none. Text only — no ROM bytes or full path dumps.
+      placeholder: "Paste diagnostic text, or write `none`."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: repro_mode
+    attributes:
+      label: Reproduces on
+      description: Check every hardware mode where you can reproduce the issue.
+      options:
+        - label: Automatic
+          required: false
+        - label: Game Boy (DMG)
+          required: false
+        - label: Game Boy Color (CGB)
+          required: false
+        - label: Not tried / unknown
+          required: false
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: Expected vs actual behavior, and steps to reproduce.
+      placeholder: |
+        Steps:
+        1. …
+        Expected:
+        Actual:
+    validations:
+      required: true

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Graycart family umbrella
+    url: https://github.com/graycart/graycart
+    about: Meta / submodule issues for the Graycart umbrella (not this emulator).
