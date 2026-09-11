@@ -1,4 +1,10 @@
+// Windows release: GUI subsystem so Explorer double-click opens only the app
+// window (no companion console). Debug builds keep the console subsystem.
+// See `windows_console` and issue #15.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod frontend;
+mod windows_console;
 
 use frontend::{LaunchRom, Verbosity, is_rom_path, run as run_window, run_tone_test};
 use graycart::{
@@ -11,6 +17,11 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 fn main() {
+    // Reattach to the launching terminal for CLI/headless stdout on GUI-subsystem
+    // release builds. No-op when there is no parent console (Explorer launch).
+    #[cfg(all(windows, not(debug_assertions)))]
+    windows_console::attach_parent_console();
+
     let mut argv: Vec<String> = env::args().skip(1).collect();
     if argv.first().map(|s| s.as_str()) == Some("--audio-test") {
         argv.remove(0);

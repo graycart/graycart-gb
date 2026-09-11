@@ -30,6 +30,8 @@ cargo run --release -- --frames 120 path/to/game.gb
 
 Tagged builds: [GitHub Releases](https://github.com/graycart/graycart-gb/releases).
 
+**Windows release note:** the packaged `.exe` is a GUI-subsystem binary (no console window on double-click). Debug `cargo run` keeps a console. Headless/CLI flags (`--frames`, `--version`, …) still print when launched from a terminal — the process reattaches to the parent console.
+
 `cargo test` covers Rust unit and integration tests only — it does not download test ROMs. Optional accuracy matrices use in-repo fixtures under [`tests/fixtures/`](tests/fixtures/); details in [docs/conformance.md](docs/conformance.md):
 
 ```bash
