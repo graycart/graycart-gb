@@ -1,0 +1,402 @@
+//! CPAL device discovery and stream construction. Failures are explicit strings.
+
+use super::os_default::os_default_render_endpoint_names;
+use super::select::{
+    AudioDevicePref, AudioDeviceSource, AudioOutputChoice, choose_output_device,
+    should_persist_choice,
+};
+use super::{AudioOut, SharedCounters, fill_f32, fill_f64, fill_i16, fill_i32, fill_u16};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{Device, Host, SampleFormat, Stream, StreamConfig, SupportedStreamConfig};
+use rtrb::RingBuffer;
+use std::cell::RefCell;
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Instant;
+
+use super::resample::AdaptiveResampler;
+
+#[derive(Debug, Clone)]
+pub struct AudioInitError {
+    pub message: String,
+    pub probe: String,
+}
+
+impl std::fmt::Display for AudioInitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)?;
+        if !self.probe.is_empty() {
+            write!(f, "\n{}", self.probe)?;
+        }
+        Ok(())
+    }
+}
+
+/// Human-readable inventory of CPAL hosts / output devices (always safe to call).
+pub fn probe_audio_backends() -> String {
+    let mut out = String::from("audio backend probe:\n");
+    let hosts = cpal::available_hosts();
+    if hosts.is_empty() {
+        out.push_str("  available hosts: (none)\n");
+        return out;
+    }
+    out.push_str(&format!(
+        "  available hosts: {}\n",
+        hosts
+            .iter()
+            .map(|h| format!("{h:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    let default_id = cpal::default_host().id();
+    out.push_str(&format!("  default host: {default_id:?}\n"));
+    for id in hosts {
+        let host = match cpal::host_from_id(id) {
+            Ok(h) => h,
+            Err(e) => {
+                out.push_str(&format!("  host {id:?}: open failed ({e})\n"));
+                continue;
+            }
+        };
+        describe_host(&mut out, &host, id);
+    }
+    out
+}
+
+fn describe_host(out: &mut String, host: &Host, id: cpal::HostId) {
+    let default_name = host
+        .default_output_device()
+        .and_then(|d| d.name().ok())
+        .unwrap_or_else(|| "(none)".into());
+    out.push_str(&format!("  host {id:?}: default output = {default_name}\n"));
+    match host.output_devices() {
+        Ok(list) => {
+            let mut n = 0usize;
+            for dev in list {
+                n += 1;
+                let name = dev.name().unwrap_or_else(|_| "(unnamed)".into());
+                match dev.default_output_config() {
+                    Ok(cfg) => out.push_str(&format!(
+                        "    device {n}: {name}  {}ch {} Hz {:?}\n",
+                        cfg.channels(),
+                        cfg.sample_rate().0,
+                        cfg.sample_format()
+                    )),
+                    Err(e) => {
+                        out.push_str(&format!("    device {n}: {name}  default config: {e}\n"))
+                    }
+                }
+            }
+            if n == 0 {
+                out.push_str("    (no output devices)\n");
+            }
+        }
+        Err(e) => out.push_str(&format!("    output_devices() failed: {e}\n")),
+    }
+}
+
+pub fn open_output_with_pref(pref: &AudioDevicePref) -> Result<AudioOut, AudioInitError> {
+    let probe = probe_audio_backends();
+    let os_defaults = os_default_render_endpoint_names();
+    let os_refs: Vec<&str> = os_defaults.iter().map(String::as_str).collect();
+    let mut last = String::new();
+    let mut hosts: Vec<(String, Host)> = Vec::new();
+    let default = cpal::default_host();
+    let default_name = format!("{:?}", default.id());
+    hosts.push((default_name, default));
+    for id in cpal::available_hosts() {
+        if hosts.iter().any(|(_, h)| h.id() == id) {
+            continue;
+        }
+        match cpal::host_from_id(id) {
+            Ok(h) => hosts.push((format!("{id:?}"), h)),
+            Err(e) => last = format!("host {id:?}: {e}"),
+        }
+    }
+
+    for (host_name, host) in hosts {
+        match try_host_with_pref(&host, &host_name, pref, &os_refs) {
+            Ok(audio) => return Ok(audio),
+            Err(e) => last = e,
+        }
+    }
+    Err(AudioInitError {
+        message: format!(
+            "audio backend initialized: no\nSTREAM not initialized\nlast error: {last}"
+        ),
+        probe,
+    })
+}
+
+fn collect_output_devices(host: &Host) -> Vec<Device> {
+    let mut devices: Vec<Device> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    if let Some(d) = host.default_output_device() {
+        if let Ok(name) = d.name() {
+            seen.insert(name);
+        }
+        devices.push(d);
+    }
+    if let Ok(list) = host.output_devices() {
+        for d in list {
+            if let Ok(name) = d.name()
+                && !seen.insert(name)
+            {
+                continue;
+            }
+            devices.push(d);
+        }
+    }
+    devices
+}
+
+pub fn list_output_device_names() -> Vec<String> {
+    let host = cpal::default_host();
+    collect_output_devices(&host)
+        .into_iter()
+        .filter_map(|d| d.name().ok())
+        .collect()
+}
+
+fn try_host_with_pref(
+    host: &Host,
+    host_name: &str,
+    pref: &AudioDevicePref,
+    os_defaults: &[&str],
+) -> Result<AudioOut, String> {
+    let mut devices = collect_output_devices(host);
+    if devices.is_empty() {
+        return Err(format!(
+            "host {host_name}: default output device unavailable (no enumerated outputs)"
+        ));
+    }
+    let names: Vec<String> = devices.iter().filter_map(|d| d.name().ok()).collect();
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let cpal_default = host.default_output_device().and_then(|d| d.name().ok());
+    let choice = choose_output_device(pref, cpal_default.as_deref(), os_defaults, &name_refs);
+    let mut candidates: Vec<(String, AudioDeviceSource)> = match choice {
+        AudioOutputChoice::Offline => {
+            return Err(format!("host {host_name}: no output devices"));
+        }
+        AudioOutputChoice::Device { name, source } => vec![(name, source)],
+    };
+    for extra in os_defaults {
+        if names.iter().any(|n| n == extra) && !candidates.iter().any(|(n, _)| n == extra) {
+            candidates.push(((*extra).to_string(), AudioDeviceSource::SystemDefault));
+        }
+    }
+
+    let mut last = String::new();
+    for (wanted, source) in candidates {
+        if !should_persist_choice(source) && source == AudioDeviceSource::Fallback {
+            eprintln!("audio: using fallback device (not persisted as default): {wanted}");
+        }
+        let Some(idx) = devices
+            .iter()
+            .position(|d| d.name().ok().as_deref() == Some(wanted.as_str()))
+        else {
+            continue;
+        };
+        let device = devices.swap_remove(idx);
+        match try_device(device, host_name, source) {
+            Ok(a) => return Ok(a),
+            Err(e) => last = e,
+        }
+    }
+    Err(if last.is_empty() {
+        format!("host {host_name}: selected output was not openable")
+    } else {
+        last
+    })
+}
+
+fn try_device(
+    device: Device,
+    host_name: &str,
+    source: AudioDeviceSource,
+) -> Result<AudioOut, String> {
+    let name = device
+        .name()
+        .unwrap_or_else(|_| "unknown device".to_string());
+    let mut configs: Vec<SupportedStreamConfig> = Vec::new();
+    match device.default_output_config() {
+        Ok(c) => configs.push(c),
+        Err(e) => {
+            if let Ok(list) = device.supported_output_configs() {
+                for range in list {
+                    configs.push(range.with_max_sample_rate());
+                }
+            }
+            if configs.is_empty() {
+                return Err(format!(
+                    "{host_name}/{name}: default_output_config failed ({e})"
+                ));
+            }
+        }
+    }
+    if let Ok(list) = device.supported_output_configs() {
+        for range in list {
+            let cfg = range.with_max_sample_rate();
+            if !configs.iter().any(|c| {
+                c.sample_format() == cfg.sample_format() && c.sample_rate() == cfg.sample_rate()
+            }) {
+                configs.push(cfg);
+            }
+        }
+    }
+    let mut last = String::new();
+    for supported in configs {
+        match try_config(&device, &name, host_name, supported, source) {
+            Ok(a) => return Ok(a),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+fn try_config(
+    device: &Device,
+    name: &str,
+    host_name: &str,
+    supported: SupportedStreamConfig,
+    source: AudioDeviceSource,
+) -> Result<AudioOut, String> {
+    let sample_format = supported.sample_format();
+    let sample_rate = supported.sample_rate().0;
+    let native_channels = supported.channels();
+    let mut config: StreamConfig = supported.into();
+    if native_channels >= 2 {
+        config.channels = 2;
+    }
+    let channels = config.channels;
+
+    let target_frames = ((sample_rate as usize) / 60).saturating_mul(3).max(1024);
+    let max_frames = ((sample_rate as usize) * 3 / 20).max(target_frames * 2);
+    let capacity_samples = max_frames * 2;
+
+    let (producer, consumer) = RingBuffer::<f32>::new(capacity_samples);
+    let consumer = Arc::new(Mutex::new(consumer));
+    let counters = Arc::new(SharedCounters::new());
+    let stream = build_stream(
+        device,
+        &config,
+        sample_format,
+        Arc::clone(&consumer),
+        Arc::clone(&counters),
+    )?;
+
+    stream
+        .play()
+        .map_err(|e| format!("{host_name}/{name}: stream.play() failed ({e})"))?;
+
+    let mut producer = producer;
+    let prime = (target_frames * 85 / 100).min(max_frames) * 2;
+    for _ in 0..prime {
+        let _ = producer.push(0.0);
+    }
+
+    Ok(AudioOut {
+        _stream: stream,
+        producer: RefCell::new(producer),
+        consumer,
+        capacity_samples,
+        counters,
+        resampler: RefCell::new(AdaptiveResampler::new()),
+        started: Instant::now(),
+        sample_rate,
+        target_frames,
+        device_name: name.to_string(),
+        host_name: host_name.to_string(),
+        sample_format: format!("{sample_format:?}"),
+        channels,
+        device_source: source,
+    })
+}
+
+fn build_stream(
+    device: &Device,
+    config: &StreamConfig,
+    sample_format: SampleFormat,
+    consumer: Arc<Mutex<rtrb::Consumer<f32>>>,
+    counters: Arc<SharedCounters>,
+) -> Result<Stream, String> {
+    let result = match sample_format {
+        SampleFormat::F32 => {
+            let consumer = Arc::clone(&consumer);
+            let ctr = Arc::clone(&counters);
+            device.build_output_stream(
+                config,
+                move |data: &mut [f32], _| {
+                    if let Ok(mut ring) = consumer.lock() {
+                        fill_f32(data, &mut ring, &ctr);
+                    }
+                },
+                |e| eprintln!("audio stream error: {e}"),
+                None,
+            )
+        }
+        SampleFormat::I16 => {
+            let consumer = Arc::clone(&consumer);
+            let ctr = Arc::clone(&counters);
+            device.build_output_stream(
+                config,
+                move |data: &mut [i16], _| {
+                    if let Ok(mut ring) = consumer.lock() {
+                        fill_i16(data, &mut ring, &ctr);
+                    }
+                },
+                |e| eprintln!("audio stream error: {e}"),
+                None,
+            )
+        }
+        SampleFormat::I32 => {
+            let consumer = Arc::clone(&consumer);
+            let ctr = Arc::clone(&counters);
+            device.build_output_stream(
+                config,
+                move |data: &mut [i32], _| {
+                    if let Ok(mut ring) = consumer.lock() {
+                        fill_i32(data, &mut ring, &ctr);
+                    }
+                },
+                |e| eprintln!("audio stream error: {e}"),
+                None,
+            )
+        }
+        SampleFormat::U16 => {
+            let consumer = Arc::clone(&consumer);
+            let ctr = Arc::clone(&counters);
+            device.build_output_stream(
+                config,
+                move |data: &mut [u16], _| {
+                    if let Ok(mut ring) = consumer.lock() {
+                        fill_u16(data, &mut ring, &ctr);
+                    }
+                },
+                |e| eprintln!("audio stream error: {e}"),
+                None,
+            )
+        }
+        SampleFormat::F64 => {
+            let consumer = Arc::clone(&consumer);
+            let ctr = Arc::clone(&counters);
+            device.build_output_stream(
+                config,
+                move |data: &mut [f64], _| {
+                    if let Ok(mut ring) = consumer.lock() {
+                        fill_f64(data, &mut ring, &ctr);
+                    }
+                },
+                |e| eprintln!("audio stream error: {e}"),
+                None,
+            )
+        }
+        other => {
+            return Err(format!(
+                "unsupported sample format {other:?} (need F32/I16/I32/U16/F64)"
+            ));
+        }
+    };
+    result.map_err(|e| format!("CPAL stream created: no ({e})"))
+}
