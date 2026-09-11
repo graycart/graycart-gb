@@ -291,7 +291,7 @@ pub fn menu_bar(
                 actions.push(UiAction::RequestFeature);
                 ui.close();
             }
-            if ui.button("GitHub token…").clicked() {
+            if ui.button("Optional GitHub token…").clicked() {
                 actions.push(UiAction::ConfigureGithubToken);
                 ui.close();
             }

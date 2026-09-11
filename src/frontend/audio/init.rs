@@ -7,7 +7,10 @@ use super::select::{
 };
 use super::{AudioOut, SharedCounters, fill_f32, fill_f64, fill_i16, fill_i32, fill_u16};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Host, SampleFormat, Stream, StreamConfig, SupportedStreamConfig};
+use cpal::{
+    Device, Host, SampleFormat, SampleRate, Stream, StreamConfig, SupportedStreamConfig,
+    SupportedStreamConfigRange,
+};
 use rtrb::RingBuffer;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -182,15 +185,21 @@ fn try_host_with_pref(
         AudioOutputChoice::Device { name, source } => vec![(name, source)],
     };
     for extra in os_defaults {
-        if names.iter().any(|n| n == extra) && !candidates.iter().any(|(n, _)| n == extra) {
+        if names.iter().any(|n| n == *extra) && !candidates.iter().any(|(n, _)| n == extra) {
             candidates.push(((*extra).to_string(), AudioDeviceSource::SystemDefault));
+        }
+    }
+    // After preferred/OS defaults fail, try every other enumerated device.
+    for name in &names {
+        if !candidates.iter().any(|(n, _)| n == name) {
+            candidates.push((name.clone(), AudioDeviceSource::Fallback));
         }
     }
 
     let mut last = String::new();
     for (wanted, source) in candidates {
-        if !should_persist_choice(source) && source == AudioDeviceSource::Fallback {
-            eprintln!("audio: using fallback device (not persisted as default): {wanted}");
+        if source == AudioDeviceSource::Fallback {
+            eprintln!("audio: trying fallback device (not persisted as default): {wanted}");
         }
         let Some(idx) = devices
             .iter()
@@ -200,7 +209,15 @@ fn try_host_with_pref(
         };
         let device = devices.swap_remove(idx);
         match try_device(device, host_name, source) {
-            Ok(a) => return Ok(a),
+            Ok(a) => {
+                if !should_persist_choice(source) {
+                    eprintln!(
+                        "audio: opened {} via {:?} (config negotiated)",
+                        a.device_name, source
+                    );
+                }
+                return Ok(a);
+            }
             Err(e) => last = e,
         }
     }
@@ -211,6 +228,57 @@ fn try_host_with_pref(
     })
 }
 
+/// Preferred host rates to probe inside each supported range (WASAPI shared-mode
+/// endpoints often reject an arbitrary max rate even when the range advertises it).
+const PREFERRED_RATES_HZ: &[u32] = &[48_000, 44_100, 96_000, 32_000, 22_050, 16_000];
+
+/// Expand supported ranges into concrete configs: prefer ≤2ch, then common rates.
+fn expand_supported_configs(
+    default: Option<SupportedStreamConfig>,
+    ranges: impl IntoIterator<Item = SupportedStreamConfigRange>,
+) -> Vec<SupportedStreamConfig> {
+    let ranges: Vec<_> = ranges.into_iter().collect();
+    let mut configs: Vec<SupportedStreamConfig> = Vec::new();
+    let mut push_unique = |cfg: SupportedStreamConfig| {
+        if !configs.iter().any(|c| {
+            c.channels() == cfg.channels()
+                && c.sample_format() == cfg.sample_format()
+                && c.sample_rate() == cfg.sample_rate()
+        }) {
+            configs.push(cfg);
+        }
+    };
+
+    if let Some(c) = default {
+        push_unique(c);
+    }
+
+    let mut ordered_ranges = ranges;
+    ordered_ranges.sort_by_key(|r| {
+        let ch = r.channels();
+        // Prefer stereo, then mono, then everything else.
+        if ch == 2 {
+            0u8
+        } else if ch == 1 {
+            1
+        } else {
+            2
+        }
+    });
+
+    for range in ordered_ranges {
+        for &hz in PREFERRED_RATES_HZ {
+            if let Some(cfg) = range.try_with_sample_rate(SampleRate(hz)) {
+                push_unique(cfg);
+            }
+        }
+        let min = range.min_sample_rate();
+        push_unique(range.with_sample_rate(min));
+        push_unique(range.with_max_sample_rate());
+    }
+    configs
+}
+
 fn try_device(
     device: Device,
     host_name: &str,
@@ -219,32 +287,17 @@ fn try_device(
     let name = device
         .name()
         .unwrap_or_else(|_| "unknown device".to_string());
-    let mut configs: Vec<SupportedStreamConfig> = Vec::new();
-    match device.default_output_config() {
-        Ok(c) => configs.push(c),
-        Err(e) => {
-            if let Ok(list) = device.supported_output_configs() {
-                for range in list {
-                    configs.push(range.with_max_sample_rate());
-                }
-            }
-            if configs.is_empty() {
-                return Err(format!(
-                    "{host_name}/{name}: default_output_config failed ({e})"
-                ));
-            }
-        }
+    let default = device.default_output_config().ok();
+    let ranges = device
+        .supported_output_configs()
+        .map(|it| it.collect::<Vec<_>>())
+        .unwrap_or_default();
+    if default.is_none() && ranges.is_empty() {
+        return Err(format!(
+            "{host_name}/{name}: no default or supported output configs"
+        ));
     }
-    if let Ok(list) = device.supported_output_configs() {
-        for range in list {
-            let cfg = range.with_max_sample_rate();
-            if !configs.iter().any(|c| {
-                c.sample_format() == cfg.sample_format() && c.sample_rate() == cfg.sample_rate()
-            }) {
-                configs.push(cfg);
-            }
-        }
-    }
+    let configs = expand_supported_configs(default, ranges);
     let mut last = String::new();
     for supported in configs {
         match try_config(&device, &name, host_name, supported, source) {
@@ -264,11 +317,10 @@ fn try_config(
 ) -> Result<AudioOut, String> {
     let sample_format = supported.sample_format();
     let sample_rate = supported.sample_rate().0;
-    let native_channels = supported.channels();
-    let mut config: StreamConfig = supported.into();
-    if native_channels >= 2 {
-        config.channels = 2;
-    }
+    // Keep the channel count from the negotiated SupportedStreamConfig.
+    // Forcing stereo on a multi-channel WASAPI mix format is a common
+    // "requested stream configuration is not supported" failure on Windows.
+    let config: StreamConfig = supported.into();
     let channels = config.channels;
 
     let target_frames = ((sample_rate as usize) / 60).saturating_mul(3).max(1024);
