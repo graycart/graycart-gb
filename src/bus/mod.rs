@@ -1,4 +1,8 @@
+mod boot;
 mod io;
+mod oam_dma;
+mod serial;
+mod vram_dma;
 pub mod wram;
 
 use crate::apu::{Apu, PCM12, PCM34};
@@ -6,14 +10,14 @@ use crate::cart::Cartridge;
 use crate::cpu::Interrupt;
 use crate::debug::TickProfile;
 use crate::hw::{
-    BLOCK_LEN, Block, CGB_BOOT_ROM_SIZE, CgbScratch, ClockState, FF72, FF73, FF74, FF75, HDMA1,
-    HDMA2, HDMA3, HDMA4, HDMA5, HardwareModel, KEY0, KEY1, Key0, Key1, STOP_PAUSE_CPU_T,
-    StartOutcome, VramDma, VramDmaMode, block_cpu_t, cgb_boot_byte, ff74_locked,
-    hblank_may_transfer,
+    CgbScratch, ClockState, FF72, FF73, FF74, FF75, HDMA1, HDMA2, HDMA3, HDMA4, HDMA5,
+    HardwareModel, KEY0, KEY1, Key0, Key1, STOP_PAUSE_CPU_T, VramDma, VramDmaMode,
 };
 use crate::input::{GameBoyButton, Joypad, P1};
-use crate::ppu::{BGPD, BGPI, OBPD, OBPI, OPRI, Ppu, PpuMode, VBK, VBLANK_LINE};
+use crate::ppu::{BGPD, BGPI, OBPD, OBPI, OPRI, Ppu, VBK};
 use crate::timer::Timer;
+use boot::BootRom;
+use serial::SerialCapture;
 use std::time::Instant;
 use wram::{SVBK, Wram};
 
@@ -34,12 +38,6 @@ use wram::{SVBK, Wram};
 /// - `$FF50` BANK — disable boot ROM overlay (DMG and CGB)
 const BOOT_DISABLE: u16 = 0xFF50;
 
-/// Installable boot firmware. CGB is a split map, not a longer DMG overlay.
-enum BootFirmware {
-    Dmg(Box<[u8; 256]>),
-    Cgb(Box<[u8; CGB_BOOT_ROM_SIZE]>),
-}
-
 pub struct Bus {
     pub cartridge: Cartridge,
     pub timer: Timer,
@@ -51,7 +49,7 @@ pub struct Bus {
     hram: [u8; 0x7F],
     ie: u8,
     /// Bytes written to `$FF01` (SB) — used by Blargg / Mooneye serial oracles.
-    serial: Vec<u8>,
+    serial: SerialCapture,
     /// T-cycles of upcoming [`Self::tick`] that must not advance OAM DMA.
     ///
     /// A `$FF46` write is the last M-cycle of its instruction; the DMA start
@@ -62,10 +60,8 @@ pub struct Bus {
     tick_profiling: bool,
     /// Last-frame tick breakdown (reset by the frontend each frame).
     pub tick_profile: TickProfile,
-    /// Optional boot firmware (DMG 256 or CGB 2048). Fast skip never maps this.
-    boot_rom: Option<BootFirmware>,
-    /// When true, CPU reads boot firmware via the model-specific overlay map.
-    boot_rom_mapped: bool,
+    /// Optional boot firmware overlay (DMG 256 or CGB 2048). Fast skip never maps this.
+    boot: BootRom,
     /// CGB KEY0 (`$FF4C`). Locked on `$FF50` unmap / Fast. Inert on DMG.
     key0: Key0,
     /// CGB OPRI (`$FF6C`). Visible on CGB silicon (native and compat).
@@ -100,12 +96,11 @@ impl Bus {
             io: [0; 0x80],
             hram: [0; 0x7F],
             ie: 0,
-            serial: Vec::new(),
+            serial: SerialCapture::new(),
             oam_dma_suppress_t: 0,
             tick_profiling: false,
             tick_profile: TickProfile::default(),
-            boot_rom: None,
-            boot_rom_mapped: false,
+            boot: BootRom::new(),
             key0: Key0::new(),
             opri: 0,
             hardware_model: HardwareModel::Dmg,
@@ -143,25 +138,22 @@ impl Bus {
 
     /// Map a 256-byte DMG boot ROM over `$0000`–`$00FF` until `$FF50` or [`Self::disable_boot_rom`].
     pub fn enable_boot_rom(&mut self, rom: &[u8; 256]) {
-        self.boot_rom = Some(BootFirmware::Dmg(Box::new(*rom)));
-        self.boot_rom_mapped = true;
+        self.boot.enable_dmg(rom);
     }
 
     /// Map 2048-byte CGB firmware (header window `$0100–$01FF` stays cartridge).
-    pub fn enable_cgb_boot_rom(&mut self, rom: &[u8; CGB_BOOT_ROM_SIZE]) {
-        self.boot_rom = Some(BootFirmware::Cgb(Box::new(*rom)));
-        self.boot_rom_mapped = true;
+    pub fn enable_cgb_boot_rom(&mut self, rom: &[u8; crate::hw::CGB_BOOT_ROM_SIZE]) {
+        self.boot.enable_cgb(rom);
     }
 
     /// Force the boot overlay off (restore / snapshot paths).
     pub fn disable_boot_rom(&mut self) {
-        self.boot_rom = None;
-        self.boot_rom_mapped = false;
+        self.boot.clear();
     }
 
     /// True while the boot ROM overlay is mapped for CPU reads.
     pub fn boot_rom_active(&self) -> bool {
-        self.boot_rom_mapped
+        self.boot.is_mapped()
     }
 
     pub fn key0(&self) -> Key0 {
@@ -180,17 +172,6 @@ impl Bus {
         self.opri = value;
     }
 
-    fn boot_overlay_byte(&self, addr: u16) -> Option<u8> {
-        if !self.boot_rom_mapped {
-            return None;
-        }
-        match self.boot_rom.as_ref()? {
-            BootFirmware::Dmg(rom) if addr <= 0x00FF => Some(rom[addr as usize]),
-            BootFirmware::Cgb(rom) => cgb_boot_byte(rom, addr),
-            _ => None,
-        }
-    }
-
     /// Power-on reset of volatile machine state; preserve cartridge SRAM and RTC.
     pub fn power_on_keep_battery(&mut self) {
         self.timer.power_on_reset();
@@ -205,8 +186,7 @@ impl Bus {
         self.serial.clear();
         self.oam_dma_suppress_t = 0;
         self.cartridge.power_on_reset_mapper();
-        self.boot_rom = None;
-        self.boot_rom_mapped = false;
+        self.boot.clear();
         self.key0 = Key0::new();
         self.opri = 0;
         self.key1 = Key1::new();
@@ -254,12 +234,12 @@ impl Bus {
 
     /// Bytes captured from `$FF01` writes (conformance serial output).
     pub fn serial_output(&self) -> &[u8] {
-        &self.serial
+        self.serial.as_slice()
     }
 
     /// UTF-8 lossy view of captured serial output.
     pub fn serial_text(&self) -> String {
-        String::from_utf8_lossy(&self.serial).into_owned()
+        self.serial.text()
     }
 
     /// ROM-only bus for unit tests (flat mapping, no MBC / cart RAM).
@@ -359,7 +339,7 @@ impl Bus {
         }
     }
 
-    fn clock_state(&self) -> ClockState {
+    pub(super) fn clock_state(&self) -> ClockState {
         if self.key1.current_double() {
             ClockState::Double
         } else {
@@ -367,99 +347,12 @@ impl Bus {
         }
     }
 
-    fn currently_hblank(&self) -> bool {
-        self.ppu.lcd_enabled() && self.ppu.mode() == PpuMode::HBlank && self.ppu.ly() < VBLANK_LINE
-    }
-
-    fn copy_vram_dma_block(&mut self, block: Block) {
-        let cgb = self.cgb_memory();
-        for i in 0..BLOCK_LEN {
-            let value = if block.garbage_src {
-                0xFF
-            } else {
-                self.read8(block.src.wrapping_add(i))
-            };
-            self.ppu
-                .vram
-                .cpu_write(block.dest.wrapping_add(i), value, cgb);
-        }
-    }
-
-    fn run_gdma(&mut self) {
-        self.gdma_running = true;
-        while let Some(block) = self.vram_dma.take_block() {
-            self.copy_vram_dma_block(block);
-            let stall = block_cpu_t(self.clock_state());
-            self.tick(stall);
-        }
-        self.gdma_running = false;
-    }
-
-    fn run_hdma_hblank_bursts(&mut self, hblank_lines: &[u8]) {
-        if self.vram_dma.mode() != VramDmaMode::Hdma {
-            return;
-        }
-        for &ly in hblank_lines {
-            if self.vram_dma.mode() != VramDmaMode::Hdma {
-                break;
-            }
-            if !hblank_may_transfer(ly, self.cpu_halted) {
-                continue;
-            }
-            self.vram_dma.allow_next_hblank_block();
-            if let Some(block) = self.vram_dma.take_block() {
-                self.copy_vram_dma_block(block);
-                self.hdma_burst = true;
-                let stall = block_cpu_t(self.clock_state());
-                self.tick(stall);
-                self.hdma_burst = false;
-            }
-        }
-    }
-
-    fn start_vram_dma(&mut self, value: u8) {
-        match self
-            .vram_dma
-            .start_from_hdma5(value, self.currently_hblank())
-        {
-            StartOutcome::StartedGdma => self.run_gdma(),
-            StartOutcome::StartedHdma { .. } | StartOutcome::AbortedHdma { .. } => {}
-        }
-    }
-
-    /// Copy the next DMA bytes from the source bus into OAM.
-    ///
-    /// While transferring, CPU OAM access returns `$FF` / ignores writes. Reads
-    /// from the DMA source bus return the byte currently in flight (bus conflict).
-    fn advance_oam_dma(&mut self, t_cycles: u32) {
-        let srcs = self.ppu.tick_dma(t_cycles);
-        for src in srcs {
-            let index = (src & 0xFF) as u8;
-            let value = self.read8_dma_source(src);
-            self.ppu.dma_write_oam_byte(index, value);
-            self.ppu.set_dma_data_byte(value);
-        }
-    }
-
-    fn cgb_memory(&self) -> bool {
+    pub(super) fn cgb_memory(&self) -> bool {
         self.hardware_model.cgb_mmio()
     }
 
-    fn echo_wram_addr(addr: u16) -> u16 {
+    pub(super) fn echo_wram_addr(addr: u16) -> u16 {
         0xC000 | ((addr - 0xE000) & 0x1FFF)
-    }
-
-    /// DMA source read — may touch ROM/VRAM/WRAM (not OAM recursion).
-    ///
-    /// `$E000`–`$FFFF` mirrors WRAM (`$C000` | ((addr - `$E000`) & `$1FFF`)).
-    fn read8_dma_source(&self, addr: u16) -> u8 {
-        let cgb = self.cgb_memory();
-        match addr {
-            0x0000..=0x7FFF | 0xA000..=0xBFFF => self.cartridge.read8(addr),
-            0x8000..=0x9FFF => self.ppu.vram.cpu_read(addr, cgb),
-            0xC000..=0xDFFF => self.wram.read(addr, cgb),
-            0xE000..=0xFFFF => self.wram.read(Self::echo_wram_addr(addr), cgb),
-        }
     }
 
     fn read8_wram_echo(&self, addr: u16) -> u8 {
@@ -470,24 +363,6 @@ impl Bus {
     fn write8_wram_echo(&mut self, addr: u16, value: u8) {
         let cgb = self.cgb_memory();
         self.wram.write(Self::echo_wram_addr(addr), value, cgb);
-    }
-
-    /// True when a CPU access to `addr` conflicts with the active OAM DMA source bus.
-    fn dma_conflicts_with(&self, addr: u16) -> bool {
-        if !self.ppu.dma_blocks_oam() {
-            return false;
-        }
-        let page = self.ppu.dma_source_page();
-        match addr {
-            // HRAM / IE never conflict.
-            0xFF80..=0xFFFF => false,
-            // OAM is locked separately (reads as `$FF`).
-            0xFE00..=0xFE9F => false,
-            0x0000..=0x7FFF | 0xA000..=0xBFFF => page < 0x80 || (0xA0..0xC0).contains(&page),
-            0x8000..=0x9FFF => (0x80..0xA0).contains(&page),
-            0xC000..=0xFDFF => page >= 0xC0,
-            _ => false,
-        }
     }
 
     pub fn read8(&self, addr: u16) -> u8 {
@@ -507,7 +382,7 @@ impl Bus {
         if self.dma_conflicts_with(addr) {
             return self.ppu.dma_data_byte();
         }
-        if let Some(b) = self.boot_overlay_byte(addr) {
+        if let Some(b) = self.boot.overlay_byte(addr) {
             return b;
         }
         match addr {
@@ -547,7 +422,7 @@ impl Bus {
                             return if self.hardware_model.native_cgb() {
                                 self.cgb_scratch.read(FF74).unwrap_or(0xFF)
                             } else {
-                                ff74_locked()
+                                crate::hw::ff74_locked()
                             };
                         }
                         PCM12 => {
@@ -657,7 +532,7 @@ impl Bus {
         if addr == BOOT_DISABLE {
             self.io[(BOOT_DISABLE - 0xFF00) as usize] = value;
             if value != 0 {
-                self.boot_rom_mapped = false;
+                self.boot.unmap();
                 if self.cgb_memory() {
                     self.key0.lock();
                 }
@@ -798,7 +673,7 @@ impl Bus {
             io: self.io,
             hram: self.hram,
             ie: self.ie,
-            serial: self.serial.clone(),
+            serial: self.serial.as_slice().to_vec(),
             oam_dma_suppress_t: self.oam_dma_suppress_t,
         }
     }
@@ -809,7 +684,7 @@ impl Bus {
         self.io = state.io;
         self.hram = state.hram;
         self.ie = state.ie;
-        self.serial = state.serial.clone();
+        self.serial = SerialCapture::from_vec(state.serial.clone());
         self.oam_dma_suppress_t = state.oam_dma_suppress_t;
     }
 }
