@@ -248,6 +248,10 @@ impl EmuState {
                                 frame_done = true;
                                 self.push_rewind_snapshot_if_due(true);
                                 self.scheduler.on_frame_presented(speed, Instant::now());
+                                // Submit per emulated frame so PLL re-evaluates
+                                // occupancy instead of dumping a catch-up batch
+                                // that spikes the queue then starves.
+                                self.submit_frame_audio(profile_detail, submit_audio);
                             } else {
                                 break;
                             }
@@ -255,7 +259,6 @@ impl EmuState {
                             break;
                         }
                     }
-                    self.submit_frame_audio(profile_detail, submit_audio);
                 }
             }
         }
@@ -309,6 +312,8 @@ impl EmuState {
             audio_callbacks,
             audio_elapsed_secs,
             audio_device,
+            audio_channels,
+            audio_buffer_size,
             apu_ch1_debug,
         ) = if let Some(a) = &self.audio {
             let stats = a.stats();
@@ -334,11 +339,14 @@ impl EmuState {
                 Some(a.callbacks()),
                 Some(a.elapsed_secs()),
                 Some(a.device_name.clone()),
+                Some(a.channels),
+                Some(a.buffer_size.clone()),
                 apu_line,
             )
         } else {
             (
-                None, None, None, None, None, None, None, None, None, None, None, None, None,
+                None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                None,
             )
         };
 
@@ -375,6 +383,8 @@ impl EmuState {
             audio_callbacks,
             audio_elapsed_secs,
             audio_device,
+            audio_channels,
+            audio_buffer_size,
             audio_init_error: self.audio_init_error.clone(),
             apu_ch1_debug,
         }

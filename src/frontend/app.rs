@@ -396,6 +396,8 @@ impl App {
             packet.audio_callbacks,
             packet.audio_elapsed_secs,
             packet.audio_device,
+            packet.audio_channels,
+            packet.audio_buffer_size,
         ) {
             (
                 Some(queued),
@@ -410,6 +412,8 @@ impl App {
                 Some(callbacks),
                 Some(elapsed),
                 Some(device),
+                Some(channels),
+                Some(buffer_size),
             ) => Some(RuntimeAudioMetrics {
                 queued,
                 target,
@@ -423,6 +427,8 @@ impl App {
                 callbacks,
                 elapsed_secs: elapsed,
                 device,
+                channels,
+                buffer_size,
             }),
             _ => None,
         };

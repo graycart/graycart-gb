@@ -2,7 +2,8 @@
 //!
 //! The APU emits PCM on the emulated DMG clock. The host device clock drifts
 //! relative to that. A PI controller on ring occupancy keeps the queue near
-//! target (±0.5% max rate change) without chasing a realtime deficit.
+//! target. Stretch (queue low) may go further than compress so a mild emu
+//! shortfall plus wireless period jitter can still refill the ring.
 
 use graycart::StereoSample;
 
@@ -10,12 +11,19 @@ use graycart::StereoSample;
 const KP: f64 = 0.8;
 /// Integral gain (normalized error · seconds ≈ per-frame at 60 Hz).
 const KI: f64 = 0.05;
-/// Maximum absolute rate correction (±0.5%).
-const MAX_CORRECTION: f64 = 0.005;
+/// Max stretch when queue is low (step down to `1 - this`): +1.2% more outs.
+pub const MAX_STRETCH: f64 = 0.012;
+/// Max compress when queue is high (step up by this): −0.8% outs.
+const MAX_COMPRESS: f64 = 0.008;
 /// Ignore tiny occupancy noise near the target.
 const DEADBAND: f64 = 0.02;
 /// Clamp on integrated error (normalized).
 const MAX_INTEGRAL: f64 = 0.08;
+
+/// True when `step` is at (or past) the max-stretch floor.
+pub fn step_pegged_low(step: f64) -> bool {
+    step <= 1.0 - MAX_STRETCH + 1e-9
+}
 
 #[derive(Debug)]
 pub struct AdaptiveResampler {
@@ -48,6 +56,7 @@ impl AdaptiveResampler {
     ///
     /// Queue high → step > 1 (consume input faster → fewer outs).
     /// Queue low  → step < 1 (consume slower → more outs).
+    /// Stretch authority is wider than compress so underrun-biased hosts recover.
     pub fn step_for_queue(&mut self, queued_frames: usize, target_frames: usize) -> f64 {
         let target = target_frames.max(1) as f64;
         let mut err = (queued_frames as f64 - target) / target;
@@ -58,7 +67,9 @@ impl AdaptiveResampler {
         } else {
             self.integral = (self.integral + err).clamp(-MAX_INTEGRAL, MAX_INTEGRAL);
         }
-        let correction = (err * KP + self.integral * KI).clamp(-MAX_CORRECTION, MAX_CORRECTION);
+        let raw = err * KP + self.integral * KI;
+        // Negative correction = stretch (more outs); positive = compress.
+        let correction = raw.clamp(-MAX_STRETCH, MAX_COMPRESS);
         1.0 + correction
     }
 
@@ -70,7 +81,7 @@ impl AdaptiveResampler {
         if err.abs() < DEADBAND {
             err = 0.0;
         }
-        let correction = (err * KP).clamp(-MAX_CORRECTION, MAX_CORRECTION);
+        let correction = (err * KP).clamp(-MAX_STRETCH, MAX_COMPRESS);
         1.0 + correction
     }
 
@@ -171,12 +182,18 @@ mod tests {
     }
 
     #[test]
-    fn correction_is_clamped() {
+    fn correction_is_clamped_asymmetric() {
         let mut r = AdaptiveResampler::new();
         let lo = r.step_for_queue(0, 1000);
         let hi = r.step_for_queue(10_000, 1000);
-        assert!((1.0 - lo) <= MAX_CORRECTION + 1e-9);
-        assert!((hi - 1.0) <= MAX_CORRECTION + 1e-9);
+        assert!((1.0 - lo) <= MAX_STRETCH + 1e-9);
+        assert!((hi - 1.0) <= MAX_COMPRESS + 1e-9);
+        assert!(
+            1.0 - lo > MAX_COMPRESS,
+            "stretch should exceed compress authority"
+        );
+        assert!(step_pegged_low(lo));
+        assert!(!step_pegged_low(1.0));
     }
 
     #[test]

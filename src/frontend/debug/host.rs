@@ -21,6 +21,8 @@ pub struct RuntimeAudioMetrics {
     pub callbacks: u64,
     pub elapsed_secs: f64,
     pub device: String,
+    pub channels: u16,
+    pub buffer_size: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -49,6 +51,8 @@ pub struct HostMetrics {
     pub audio_callbacks: u64,
     pub audio_elapsed_secs: f64,
     pub audio_device: String,
+    pub audio_channels: u16,
+    pub audio_buffer_size: String,
     pub audio_init_error: Option<String>,
     pub resample_step: f64,
     pub peak_l: f32,
@@ -100,6 +104,8 @@ impl HostMetrics {
             callbacks,
             elapsed,
             device,
+            channels,
+            buffer_size,
         ) = if let Some(r) = audio_from_runtime {
             (
                 r.queued,
@@ -114,6 +120,8 @@ impl HostMetrics {
                 r.callbacks,
                 r.elapsed_secs,
                 r.device,
+                r.channels,
+                r.buffer_size,
             )
         } else {
             match audio {
@@ -132,9 +140,26 @@ impl HostMetrics {
                         a.callbacks(),
                         a.elapsed_secs(),
                         a.device_name.clone(),
+                        a.channels,
+                        a.buffer_size.clone(),
                     )
                 }
-                None => (0, 0, 0, 0, 0, 0, 0, 1.0, 0, 0, 0.0, String::new()),
+                None => (
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1.0,
+                    0,
+                    0,
+                    0.0,
+                    String::new(),
+                    0,
+                    String::new(),
+                ),
             }
         };
         let pct = if target > 0 {
@@ -172,6 +197,8 @@ impl HostMetrics {
             audio_callbacks: callbacks,
             audio_elapsed_secs: elapsed,
             audio_device: device,
+            audio_channels: channels,
+            audio_buffer_size: buffer_size,
             audio_init_error,
             resample_step: step,
             peak_l,

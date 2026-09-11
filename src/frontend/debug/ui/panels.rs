@@ -147,6 +147,23 @@ fn draw_panel(ui: &mut Ui, frame: &mut DebugFrame<'_>, id: PanelId) {
             );
             mono_kv(
                 ui,
+                "LAYOUT",
+                &if host.audio_offline() {
+                    "—".to_string()
+                } else {
+                    format!(
+                        "{}ch {}",
+                        host.audio_channels,
+                        if host.audio_buffer_size.is_empty() {
+                            "?"
+                        } else {
+                            host.audio_buffer_size.as_str()
+                        }
+                    )
+                },
+            );
+            mono_kv(
+                ui,
                 "DEVICE",
                 &if host.audio_offline() {
                     host.audio_init_error

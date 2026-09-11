@@ -10,6 +10,14 @@ workflow fails.
 
 ## Unreleased
 
+## 0.11.5
+
+- Audio: residual PRO X 2 / wireless underrun pacing — soft queue target ~5 display
+  frames, emergency catch-up below ~50% (or when PLL stretch is pegged), asymmetric
+  PLL (±1.2% stretch / ±0.8% compress), per-frame catch-up submits, and debug
+  capture of negotiated `channels` + Fixed vs Default `buffer_size`
+  ([#23](https://github.com/graycart/graycart-gb/pull/23)).
+
 ## 0.11.4
 
 - Audio: map stereo PCM into multi-channel WASAPI frames (L/R + silence) instead of

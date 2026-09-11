@@ -341,9 +341,9 @@ fn try_config(
     let mut config: StreamConfig = supported.into();
     let channels = config.channels;
 
-    // Soft target ~4 display frames (~67 ms @ 48 kHz): extra margin for USB /
-    // wireless headsets whose WASAPI period jitter exceeds the old 3-frame target.
-    let target_frames = ((sample_rate as usize) / 60).saturating_mul(4).max(1024);
+    // Soft target ~5 display frames (~83 ms @ 48 kHz): margin for USB /
+    // wireless headsets whose WASAPI Default period often lands near ~10 ms.
+    let target_frames = ((sample_rate as usize) / 60).saturating_mul(5).max(1024);
     let max_frames = ((sample_rate as usize) * 3 / 20).max(target_frames * 2);
     let capacity_samples = max_frames * 2;
 
@@ -354,6 +354,7 @@ fn try_config(
     let (producer, consumer) = RingBuffer::<f32>::new(capacity_samples);
     let consumer = Arc::new(Mutex::new(consumer));
     let counters = Arc::new(SharedCounters::new());
+    let mut buffer_size = format!("Fixed({preferred_period})");
     let stream = match build_stream(
         device,
         &config,
@@ -365,6 +366,7 @@ fn try_config(
         Ok(s) => s,
         Err(_) => {
             config.buffer_size = cpal::BufferSize::Default;
+            buffer_size = "Default".to_string();
             build_stream(
                 device,
                 &config,
@@ -400,6 +402,7 @@ fn try_config(
         host_name: host_name.to_string(),
         sample_format: format!("{sample_format:?}"),
         channels,
+        buffer_size,
         device_source: source,
     })
 }
