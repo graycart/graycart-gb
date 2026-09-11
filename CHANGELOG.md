@@ -10,10 +10,19 @@ workflow fails.
 
 ## 0.11.3
 
-Battery `.sav` files default to the Graycart data `saves/` directory instead of
-beside the ROM. ROM-adjacent sidecars still load as a migration fallback;
-`--save` remains an explicit override. Flushes create the saves directory and
-do not dual-write.
+Post-`v0.11.2` host fixes:
+
+- Saves: battery `.sav` files default to the Graycart data `saves/` directory
+  instead of beside the ROM. ROM-adjacent sidecars still load as a migration
+  fallback; `--save` remains an explicit override. Flushes create the saves
+  directory and do not dual-write
+  ([#13](https://github.com/graycart/graycart-gb/issues/13) /
+  [#19](https://github.com/graycart/graycart-gb/pull/19)).
+- Windows: release `graycart.exe` uses the GUI subsystem so double-click does not
+  open a companion console; CLI/headless modes reattach to the parent terminal
+  for stdout/stderr
+  ([#15](https://github.com/graycart/graycart-gb/issues/15) /
+  [#18](https://github.com/graycart/graycart-gb/pull/18)).
 
 ## 0.11.2
 
@@ -29,9 +38,6 @@ playability fixes from [#10](https://github.com/graycart/graycart-gb/issues/10) 
   (replaces macOS-only `pbcopy`).
 - Reporting: Send without a fine-grained PAT is a first-class path (copy body +
   open GitHub new-issue form); Help menu labels the token as optional.
-- Windows: release `graycart.exe` uses the GUI subsystem so double-click does not
-  open a companion console; CLI/headless modes reattach to the parent terminal
-  for stdout/stderr ([#15](https://github.com/graycart/graycart-gb/issues/15)).
 
 ## 0.11.1
 
