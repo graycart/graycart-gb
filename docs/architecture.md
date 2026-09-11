@@ -9,7 +9,7 @@ CPU → Bus → Cartridge (MBC0/1/2/3/5)
         ↘ ppu     LCD, palettes, CGB attrs/priority
         ↘ apu     NR10–NR52 (host device IDs stay in frontend/)
         ↘ input   GameBoyButton / FF00 only
-save/     .sav (+ MBC3 RTC trailer)
+save/     .sav under Graycart data `saves/` (+ MBC3 RTC trailer; legacy ROM sidecar load fallback)
 snapshot/ GCS1 machine state
 frontend/ winit, GPU present, egui, CPAL, gilrs
 ```

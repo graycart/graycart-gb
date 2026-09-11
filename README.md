@@ -4,7 +4,7 @@ DMG and Game Boy Color emulator. This repository is **`graycart-gb`** in the [Gr
 
 CGB silicon is on (`CGB_SILICON_READY`). Hardware mode **Automatic** runs as Game Boy Color; you can still force original Game Boy or Game Boy Color.
 
-Version **0.11.2** — not 1.0. KEY1 and HDMA are in for playable CGB. Packaging, trusted settings migration, and save/state compatibility are still open.
+Version **0.11.3** — not 1.0. KEY1 and HDMA are in for playable CGB. Packaging, trusted settings migration, and save/state compatibility are still open.
 
 ## Status
 
@@ -78,7 +78,7 @@ The Audio menu caches the device list so WASAPI/CPAL are not re-enumerated every
 
 ## Saves, states, rewind
 
-- Battery `.sav` next to the ROM (load on start, flush on exit). Keep dumps out of git.
+- Battery `.sav` files live under the Graycart data directory (`…/Graycart/saves/{stem}.sav` via `dirs::data_dir`). The directory is created on first flush. Existing ROM-adjacent `.sav` files still load as a migration fallback; the next flush writes only to the dedicated path (no dual-write). `--save <path>` always wins. Keep dumps out of git.
 - State slots `{rom}.gcs0`–`.gcs9` (GCS1).
 - In-memory rewind ring (hold R).
 

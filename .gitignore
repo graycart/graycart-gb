@@ -7,6 +7,7 @@ __pycache__/
 # Commercial dumps and sidecars — never commit
 carts/*.gb
 carts/*.gbc
+/saves/
 *.sav
 *.gcs[0-9]
 *.gcs

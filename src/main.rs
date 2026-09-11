@@ -4,7 +4,7 @@ use frontend::{LaunchRom, Verbosity, is_rom_path, run as run_window, run_tone_te
 use graycart::{
     BootMode, Cartridge, Cpu, ExecSession, HostHardwarePref, RunOutcome, apply_fast,
     bus_from_cartridge, default_save_path, disassemble, flush_save, format_trace_line, hex_dump,
-    load_save,
+    legacy_sidecar_save_path, load_save, load_save_with_fallback,
 };
 use std::env;
 use std::path::{Path, PathBuf};
@@ -220,13 +220,29 @@ fn main() {
         process::exit(1);
     }
 
+    let explicit_save = save_path_arg.is_some();
     let save_path = save_path_arg.unwrap_or_else(|| default_save_path(&path));
     let persist = run || frame_cap.is_some();
     if persist {
-        match load_save(&save_path, &mut cart) {
+        let load_result = if explicit_save {
+            load_save(&save_path, &mut cart)
+        } else {
+            let legacy = legacy_sidecar_save_path(&path);
+            load_save_with_fallback(&save_path, Some(&legacy), &mut cart)
+        };
+        match load_result {
             Ok(true) => {
                 if verbosity != Verbosity::Quiet {
-                    println!("save: loaded {}", save_path.display());
+                    if explicit_save || save_path.exists() {
+                        println!("save: loaded {}", save_path.display());
+                    } else {
+                        let legacy = legacy_sidecar_save_path(&path);
+                        println!(
+                            "save: loaded {} (legacy sidecar; next flush → {})",
+                            legacy.display(),
+                            save_path.display()
+                        );
+                    }
                 }
             }
             Ok(false) => {
