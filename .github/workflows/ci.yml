@@ -1,3 +1,10 @@
+# CI: fmt + clippy + cargo test on ubuntu / macOS / windows.
+# fail-fast is false so one OS flake does not cancel the others.
+# RUST_MIN_STACK keeps deep emulator recursion from overflowing the default thread stack.
+#
+# Policy: ROM / conformance matrices marked `#[ignore]` are manual / opt-in only.
+# Do not run `cargo test -- --ignored` in this workflow — those need fixtures under
+# tests/fixtures/ or local carts/ and are not CI-blocking. See docs/conformance.md.
 name: ci
 
 on:
@@ -33,4 +40,5 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test
+        # Default cargo test only — ignored ROM matrices stay opt-in (see header).
         run: cargo test
