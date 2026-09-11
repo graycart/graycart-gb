@@ -1,8 +1,8 @@
 //! Host audio output — adaptive sync + SPSC ring → CPAL callback.
 //!
 //! Emulation produces PCM on the DMG clock; the host device clock drifts.
-//! A PI occupancy controller (±0.5%) keeps the ring near its soft target.
-//! The CPAL callback only pops samples (no locks, no emulator access).
+//! A PI occupancy controller (asymmetric stretch/compress) keeps the ring near
+//! its soft target. The CPAL callback only pops samples (no locks, no emulator access).
 
 mod init;
 mod os_default;
@@ -10,7 +10,7 @@ mod resample;
 mod select;
 
 use graycart::StereoSample;
-use resample::AdaptiveResampler;
+use resample::{AdaptiveResampler, step_pegged_low};
 use rtrb::{Consumer, Producer};
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -86,12 +86,14 @@ pub struct AudioOut {
     pub(crate) started: Instant,
     /// Device sample rate (APU should match via [`graycart::Apu::set_output_sample_rate`]).
     pub sample_rate: u32,
-    /// Soft target occupancy (~4 display frames).
+    /// Soft target occupancy (~5 display frames).
     pub target_frames: usize,
     pub device_name: String,
     pub host_name: String,
     pub sample_format: String,
     pub channels: u16,
+    /// Negotiated CPAL buffer size: `Fixed(N)` or `Default`.
+    pub buffer_size: String,
     pub device_source: AudioDeviceSource,
 }
 
@@ -121,6 +123,7 @@ impl AudioOut {
              default output device: {}\n\
              host: {}\n\
              supported/default config: {}ch {} Hz {}\n\
+             buffer_size: {}\n\
              CPAL stream created: yes\n\
              CPAL stream.play(): success\n\
              selected host rate: {} Hz\n\
@@ -131,6 +134,7 @@ impl AudioOut {
             self.channels,
             self.sample_rate,
             self.sample_format,
+            self.buffer_size,
             self.sample_rate,
             self.capacity_samples / 2,
             self.target_frames
@@ -158,11 +162,16 @@ impl AudioOut {
 
     /// Genuine underrun risk only — not the normal sync mechanism.
     ///
-    /// True when the ring is below ~25% of the soft target (or &lt; 256 frames).
+    /// True when the ring is below ~50% of the soft target (or &lt; 256 frames),
+    /// or when the PLL is pegged at max stretch while occupancy is still under
+    /// target (soft underrun: stretch alone cannot catch Lightspeed jitter).
     pub fn needs_emergency_catch_up(&self) -> bool {
         let q = self.queued_frames();
-        let floor = (self.target_frames / 4).max(256);
-        q < floor
+        let floor = (self.target_frames / 2).max(256);
+        if q < floor {
+            return true;
+        }
+        step_pegged_low(self.last_resample_step()) && q < self.target_frames
     }
 
     pub fn submit(&self, samples: &[StereoSample]) {

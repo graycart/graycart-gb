@@ -45,6 +45,8 @@ pub struct FramePacket {
     pub audio_callbacks: Option<u64>,
     pub audio_elapsed_secs: Option<f64>,
     pub audio_device: Option<String>,
+    pub audio_channels: Option<u16>,
+    pub audio_buffer_size: Option<String>,
     pub audio_init_error: Option<String>,
     pub apu_ch1_debug: Option<String>,
 }
@@ -82,6 +84,8 @@ impl Default for FramePacket {
             audio_callbacks: None,
             audio_elapsed_secs: None,
             audio_device: None,
+            audio_channels: None,
+            audio_buffer_size: None,
             audio_init_error: None,
             apu_ch1_debug: None,
         }

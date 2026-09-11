@@ -344,6 +344,8 @@ fn format_audio_section(host: &HostMetrics) -> String {
              host_rate_hz: {}\n\
              DEVICE       {}\n\
              STREAM       initialized\n\
+             channels: {}\n\
+             buffer_size: {}\n\
              target_queue: {}\n\
              queue: {} / {} ({:.0}%)\n\
              samples generated/sec: {:.0}\n\
@@ -355,6 +357,8 @@ fn format_audio_section(host: &HostMetrics) -> String {
              resample_step: {:.5}\n\n",
             host.audio_sample_rate,
             host.audio_device,
+            host.audio_channels,
+            host.audio_buffer_size,
             host.audio_target,
             host.audio_queued,
             host.audio_target,
@@ -422,6 +426,8 @@ mod tests {
             audio_queued: 2000,
             audio_queue_pct: 90.0,
             audio_device: "Speakers".into(),
+            audio_channels: 2,
+            audio_buffer_size: "Fixed(960)".into(),
             audio_elapsed_secs: 1.0,
             audio_produced: 48_000,
             audio_consumed: 47_000,
@@ -432,5 +438,7 @@ mod tests {
         assert!(body.contains("status: ONLINE"));
         assert!(body.contains("host_rate_hz: 48000"));
         assert!(body.contains("STREAM       initialized"));
+        assert!(body.contains("channels: 2"));
+        assert!(body.contains("buffer_size: Fixed(960)"));
     }
 }
