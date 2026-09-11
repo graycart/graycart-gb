@@ -1,3 +1,8 @@
+# Tag push vX.Y.Z must equal Cargo.toml [package].version (AGENTS.md SemVer).
+# Published assets (per target):
+#   graycart-{version}-{target}[.exe]
+#   graycart-{version}-{target}[.exe].sha256
+# Targets: linux gnu, Windows MSVC, macOS Apple Silicon + Intel.
 name: release
 
 on:
@@ -25,6 +30,8 @@ jobs:
             target: x86_64-pc-windows-msvc
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
       - name: Linux audio/input libs
@@ -38,35 +45,46 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           ver="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
           echo "tag=$tag crate=$ver"
-          test "$tag" = "$ver"
+          if [ "$tag" != "$ver" ]; then
+            echo "::error::Git tag v${tag} must equal Cargo.toml version ${ver}. Bump [package].version (and CHANGELOG) before tagging."
+            exit 1
+          fi
       - name: Release build
         run: cargo build --release --target ${{ matrix.target }} --locked
       - name: Pack artifact
         run: |
+          set -euo pipefail
           ver="${GITHUB_REF_NAME#v}"
-          name="graycart-${ver}-${{ matrix.target }}"
+          target="${{ matrix.target }}"
+          stem="graycart-${ver}-${target}"
           mkdir -p dist
-          if [ -f "target/${{ matrix.target }}/release/graycart.exe" ]; then
-            cp "target/${{ matrix.target }}/release/graycart.exe" "dist/${name}.exe"
-            file="${name}.exe"
+          if [ -f "target/${target}/release/graycart.exe" ]; then
+            file="${stem}.exe"
+            cp "target/${target}/release/graycart.exe" "dist/${file}"
+          elif [ -f "target/${target}/release/graycart" ]; then
+            file="${stem}"
+            cp "target/${target}/release/graycart" "dist/${file}"
+            chmod +x "dist/${file}"
           else
-            cp "target/${{ matrix.target }}/release/graycart" "dist/${name}"
-            chmod +x "dist/${name}"
-            file="${name}"
+            echo "::error::Release binary missing for target ${target}"
+            ls -la "target/${target}/release/" || true
+            exit 1
           fi
           export FILE="$file"
           python - <<'PY'
-          import hashlib, pathlib, os
+          import hashlib, os, pathlib
           dist = pathlib.Path("dist")
           name = os.environ["FILE"]
           data = (dist / name).read_bytes()
           digest = hashlib.sha256(data).hexdigest()
           (dist / f"{name}.sha256").write_text(f"{digest}  {name}\n", encoding="utf-8")
+          print(f"packed {name} sha256={digest}")
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: graycart-${{ matrix.target }}
+          name: graycart-${{ github.ref_name }}-${{ matrix.target }}
           path: dist/*
+          if-no-files-found: error
 
   publish:
     needs: build
@@ -77,7 +95,58 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: List release assets
+        run: |
+          set -euo pipefail
+          echo "Assets to publish:"
+          find dist -type f | sort
+          count="$(find dist -type f | wc -l)"
+          # 4 targets × (binary + sha256)
+          test "$count" -eq 8
+      - name: Compose release notes from CHANGELOG
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          export VER="$ver"
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          ver = os.environ["VER"]
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = rf"(?ms)^## {re.escape(ver)}\s*\n(.*?)(?=^## |\Z)"
+          match = re.search(pattern, text)
+          lines = [
+              f"## Graycart {ver}",
+              "",
+              "Prebuilt binaries attach below as `graycart-{version}-{target}` "
+              "(Windows adds `.exe`) plus a matching `.sha256` sidecar.",
+              "",
+              "Download the asset for your OS, verify the checksum if you like, "
+              "then run the binary. Build-from-source remains "
+              "`cargo run --release`.",
+              "",
+          ]
+          if match:
+              section = match.group(1).strip()
+              if section:
+                  lines.extend(["### Changelog", "", section, ""])
+          else:
+              lines.extend(
+                  [
+                      f"_No `## {ver}` section found in CHANGELOG.md._",
+                      "",
+                  ]
+              )
+          pathlib.Path("release-notes-preamble.md").write_text(
+              "\n".join(lines) + "\n", encoding="utf-8"
+          )
+          PY
       - uses: softprops/action-gh-release@v2
         with:
+          name: Graycart ${{ github.ref_name }}
+          body_path: release-notes-preamble.md
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: dist/**
