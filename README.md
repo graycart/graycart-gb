@@ -28,7 +28,13 @@ Headless:
 cargo run --release -- --frames 120 path/to/game.gb
 ```
 
-`cargo test` is **Rust unit and integration tests only** (no test-ROM download). ROM matrices stay in this repo: `cargo test --test roms … -- --ignored`.
+Prebuilt binaries (when tagged): [GitHub Releases](https://github.com/graycart/graycart-gb/releases).
+
+`cargo test` is **Rust unit and integration tests only** (no test-ROM download). Optional ROM matrices use in-repo fixtures under [`tests/fixtures/`](tests/fixtures/) — see [docs/conformance.md](docs/conformance.md):
+
+```bash
+cargo test --test roms blargg_cpu_instrs_matrix -- --ignored
+```
 
 Required before a change is done:
 
@@ -82,8 +88,15 @@ Debug monitor (F12) observes; it does not own emulation. Snapshots are produced 
 
 See [docs/conformance.md](docs/conformance.md).
 
+- **CI / clone-and-go:** `cargo test` (no ROMs required).
+- **Optional accuracy matrices:** Blargg and Mooneye fixtures in `tests/fixtures/`; run with `cargo test --test roms … -- --ignored` (manual / opt-in, not CI-blocking).
+
+## Reporting issues
+
+Coming in **0.11.x**: in-app Help → Report bug… / Request feature… with explicit Send consent. Until that ships, open issues on this repository’s [GitHub Issues](https://github.com/graycart/graycart-gb/issues) page.
+
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 Graycart.
 
-Blargg / Mooneye / Acid2 ROMs keep their **upstream** licenses. Do not add commercial cartridges to git.
+The repository MIT license does **not** cover Blargg or Mooneye (or future Acid2) test ROM fixtures under `tests/fixtures/`. Those keep their **upstream** licenses; see [tests/fixtures/README.md](tests/fixtures/README.md) for provenance. Do not add commercial cartridges to git.
