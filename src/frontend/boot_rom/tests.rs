@@ -154,6 +154,17 @@ fn load_cgb_rejects_wrong_size_on_disk() {
 }
 
 #[test]
+fn any_cached_uses_size_not_full_read() {
+    let dir = tempdir().unwrap();
+    let path = boot_rom_cache_path(dir.path());
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, [0u8; 255]).unwrap();
+    assert!(!any_cached_boot_firmware(dir.path()));
+    fs::write(&path, [0xAAu8; 256]).unwrap();
+    assert!(any_cached_boot_firmware(dir.path()));
+}
+
+#[test]
 fn path_ends_with_boot_cgb_boot_bin() {
     let p = cgb_boot_rom_cache_path(Path::new("/fake/graycart"));
     assert!(

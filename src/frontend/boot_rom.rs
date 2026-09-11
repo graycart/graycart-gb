@@ -96,8 +96,19 @@ fn install_named(
     }
 }
 
+/// True when a correctly sized DMG or CGB boot image is present beside the exe.
+///
+/// Host-path only: checks file length via metadata (no full read). Callers that
+/// need the bytes still use [`load_cached_boot_rom`] / [`load_cached_cgb_boot_rom`].
 pub fn any_cached_boot_firmware(exe_dir: &Path) -> bool {
-    load_cached_boot_rom(exe_dir).is_some() || load_cached_cgb_boot_rom(exe_dir).is_some()
+    cached_file_has_len(&boot_rom_cache_path(exe_dir), BOOT_ROM_SIZE)
+        || cached_file_has_len(&cgb_boot_rom_cache_path(exe_dir), CGB_BOOT_ROM_SIZE)
+}
+
+fn cached_file_has_len(path: &Path, expected: usize) -> bool {
+    fs::metadata(path)
+        .ok()
+        .is_some_and(|m| m.len() as usize == expected)
 }
 
 fn remove_if_present(path: &Path) -> Result<(), String> {
