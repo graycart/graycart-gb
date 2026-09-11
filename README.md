@@ -2,16 +2,16 @@
 
 DMG and Game Boy Color emulator. This repository is **`graycart-gb`** in the [Graycart family](https://github.com/graycart/graycart). The crate and binary are named **`graycart`**.
 
-**CGB silicon is on** (`CGB_SILICON_READY`). Emulation → Hardware **Automatic** uses CGB hardware. You can still force original Game Boy or Game Boy Color.
+CGB silicon is on (`CGB_SILICON_READY`). Hardware mode **Automatic** runs as Game Boy Color; you can still force original Game Boy or Game Boy Color.
 
-This is **0.11.1**, not 1.0.0. Playable CGB needs KEY1 + HDMA (landed). Packaging, trusted settings migration, and save/state compatibility are still open.
+Version **0.11.2** — not 1.0. KEY1 and HDMA are in for playable CGB. Packaging, trusted settings migration, and save/state compatibility are still open.
 
 ## Status
 
-- **DMG:** playable; Blargg `cpu_instrs` and `dmg_sound` are the CPU/APU accuracy gates.
+- **DMG:** playable. Blargg `cpu_instrs` and `dmg_sound` are the CPU/APU accuracy gates.
 - **CGB:** palettes, attributes, priority, double-speed, GDMA/HDMA, CGB boot mapping.
-- **Mappers:** MBC0 / MBC1 / MBC2 / MBC3 (+ RTC) / MBC5. Unsupported types fail loudly (no silent ROM-only).
-- **Host:** Windows, macOS, Linux. Release builds are the supported play mode; debug is not expected to hold realtime.
+- **Mappers:** MBC0 / MBC1 / MBC2 / MBC3 (+ RTC) / MBC5. Unsupported cartridge types fail loudly instead of pretending to be ROM-only.
+- **Host:** Windows, macOS, Linux. Use a release build for play; debug builds are not expected to keep realtime.
 
 ## Build and run
 
@@ -28,15 +28,15 @@ Headless:
 cargo run --release -- --frames 120 path/to/game.gb
 ```
 
-Prebuilt binaries (when tagged): [GitHub Releases](https://github.com/graycart/graycart-gb/releases).
+Tagged builds: [GitHub Releases](https://github.com/graycart/graycart-gb/releases).
 
-`cargo test` is **Rust unit and integration tests only** (no test-ROM download). Optional ROM matrices use in-repo fixtures under [`tests/fixtures/`](tests/fixtures/) — see [docs/conformance.md](docs/conformance.md):
+`cargo test` covers Rust unit and integration tests only — it does not download test ROMs. Optional accuracy matrices use in-repo fixtures under [`tests/fixtures/`](tests/fixtures/); details in [docs/conformance.md](docs/conformance.md):
 
 ```bash
 cargo test --test roms blargg_cpu_instrs_matrix -- --ignored
 ```
 
-Required before a change is done:
+Before you call a change done:
 
 ```bash
 cargo fmt --check
@@ -46,7 +46,7 @@ cargo test
 
 ## Hardware mode
 
-`$0143` is cartridge capability, not a 1:1 hardware switch. `.gbc` is a filename hint only.
+Cartridge header `$0143` is capability, not a 1:1 hardware switch. A `.gbc` extension is only a filename hint.
 
 | Menu / `--hardware` | Meaning |
 |---------------------|---------|
@@ -56,9 +56,9 @@ cargo test
 
 ## Boot ROM
 
-Nintendo firmware is **not** in this repository. Fast boot is the default.
+Nintendo firmware is not in this repository. Fast boot is the default.
 
-Optional official `dmg_boot.bin` (256 bytes) and CGB boot (2048 bytes) can be installed from the UI (boot firmware cache next to the executable). Do not commit `*.bin` boot images.
+You can install official `dmg_boot.bin` (256 bytes) and CGB boot (2048 bytes) from the UI; they live in a boot-firmware cache next to the executable. Do not commit `*.bin` boot images.
 
 ## Controls (defaults)
 
@@ -66,13 +66,15 @@ Keyboard: arrows = D-pad, **Z** = B, **X** = A, Backspace = Select, Enter = Star
 
 Host: F5 quick save, F8 quick load, F6 screenshot, hold R rewind, F11 fullscreen, F12 debug monitor, F9 capture.
 
-**Configure Controls** is a separate window. It does not pause the emulator or treat the session as unfocused.
+**Configure Controls** opens in its own window. It does not pause the emulator or treat the session as unfocused.
+
+The debug monitor (F12) observes only; it does not drive emulation. Snapshots are taken on the emu thread.
 
 ## Audio
 
-Release builds open a host output stream (CPAL). **System Default** prefers the OS endpoint (WASAPI / Core Audio / Pulse+ALSA bridges), then CPAL default, then a loud fallback (never saved as your choice), else audio offline.
+Release builds open a host output stream (CPAL). **System Default** prefers the OS endpoint (WASAPI / Core Audio / Pulse+ALSA bridges), then the CPAL default, then a loud fallback that is never saved as your choice — otherwise audio stays offline.
 
-Audio → device list is cached; enumerating WASAPI/CPAL every frame is not done.
+The Audio menu caches the device list so WASAPI/CPAL are not re-enumerated every frame.
 
 ## Saves, states, rewind
 
@@ -80,23 +82,14 @@ Audio → device list is cached; enumerating WASAPI/CPAL every frame is not done
 - State slots `{rom}.gcs0`–`.gcs9` (GCS1).
 - In-memory rewind ring (hold R).
 
-## Diagnostics
-
-Debug monitor (F12) observes; it does not own emulation. Snapshots are produced on the emu thread.
-
-## Tests
-
-See [docs/conformance.md](docs/conformance.md).
-
-- **CI / clone-and-go:** `cargo test` (no ROMs required).
-- **Optional accuracy matrices:** Blargg and Mooneye fixtures in `tests/fixtures/`; run with `cargo test --test roms … -- --ignored` (manual / opt-in, not CI-blocking).
-
 ## Reporting issues
 
-Coming in **0.11.x**: in-app Help → Report bug… / Request feature… with explicit Send consent. Until that ships, open issues on this repository’s [GitHub Issues](https://github.com/graycart/graycart-gb/issues) page.
+Help → **Report bug…** / **Request feature…** (and crash consent) only file after an explicit Send. A fine-grained GitHub PAT is optional — Help → **Optional GitHub token…** or `GRAYCART_GITHUB_TOKEN`. Without a token, Send copies the report and opens the GitHub new-issue form.
+
+You can also file from [GitHub Issues](https://github.com/graycart/graycart-gb/issues). Do not paste org secrets into the repo or release binaries. See [CONTRIBUTING.md](CONTRIBUTING.md) for form fields and privacy notes.
 
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 Graycart.
 
-The repository MIT license does **not** cover Blargg or Mooneye (or future Acid2) test ROM fixtures under `tests/fixtures/`. Those keep their **upstream** licenses; see [tests/fixtures/README.md](tests/fixtures/README.md) for provenance. Do not add commercial cartridges to git.
+The repository MIT license does **not** cover Blargg or Mooneye (or future Acid2) test ROM fixtures under `tests/fixtures/`. Those keep their upstream licenses; see [tests/fixtures/README.md](tests/fixtures/README.md) for provenance. Do not add commercial cartridges to git.

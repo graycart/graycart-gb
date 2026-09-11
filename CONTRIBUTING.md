@@ -70,9 +70,9 @@ Feature form body field: `description` only (issue **title** is the GitHub title
 
 Never attach ROM bytes, saves, states, or boot firmware. Prefer header title + basename; scrub username-bearing paths.
 
-### In-app filing (coming in 0.11.x)
+### In-app filing
 
-Help → **Report bug…** / **Request feature…** and crash-consent filing will create issues via a **user fine-grained PAT** (settings and/or `GRAYCART_GITHUB_TOKEN`). Configure the token in the app when that lands — do not paste org secrets into the repo or release binaries. Until then, use the GitHub issue forms above.
+Help → **Report bug…** / **Request feature…** and crash-consent filing only send after explicit consent. A fine-grained PAT is optional (Help → **Optional GitHub token…** and/or `GRAYCART_GITHUB_TOKEN`); without one, Send copies the body and opens the GitHub form. Do not paste org secrets into the repo or release binaries. GitHub issue forms above still work fine.
 
 ## Pull requests
 
