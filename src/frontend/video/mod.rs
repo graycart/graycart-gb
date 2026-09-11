@@ -24,6 +24,7 @@ pub struct Renderer {
     window: Arc<Window>,
     pixels: Pixels<'static>,
     base_title: String,
+    /// Soft-blur scratch / DMG ghosting history (reused; not allocated on Sharp).
     previous_frame: Option<Vec<u8>>,
 }
 
