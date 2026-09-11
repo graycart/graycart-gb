@@ -17,6 +17,8 @@ Commercial progress is a **smoke test**. Conformance ROMs are the **accuracy tes
 
 The **lib** is the machine. The **binary** (`frontend/`) owns winit/wgpu/egui/cpal. Core speaks framebuffer, PCM, and `GameBoyButton` only. Headless `--frames` must not depend on the window stack.
 
+Windows release binaries use the GUI subsystem (`windows_subsystem = "windows"`) so Explorer launches stay console-free; `AttachConsole` reconnects CLI stdout to the parent terminal. Debug builds keep the console subsystem. Release packaging verifies PE subsystem via `tools/check_pe_subsystem.py`.
+
 - Shade → RGB and display effects live in `frontend/video` only.
 - UI: no disabled “coming soon” items.
 - Release builds are the supported play mode. `FramePacer` is the wall-clock cadence; do not treat debug slowness as an APU bug.

@@ -29,6 +29,9 @@ playability fixes from [#10](https://github.com/graycart/graycart-gb/issues/10) 
   (replaces macOS-only `pbcopy`).
 - Reporting: Send without a fine-grained PAT is a first-class path (copy body +
   open GitHub new-issue form); Help menu labels the token as optional.
+- Windows: release `graycart.exe` uses the GUI subsystem so double-click does not
+  open a companion console; CLI/headless modes reattach to the parent terminal
+  for stdout/stderr ([#15](https://github.com/graycart/graycart-gb/issues/15)).
 
 ## 0.11.1
 

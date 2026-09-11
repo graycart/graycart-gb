@@ -19,9 +19,14 @@ pub fn resolve_token(settings: &FrontendSettings) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Parallel cargo tests race on process-wide env; serialize mutations of ENV_TOKEN.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn settings_beats_env() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let settings = FrontendSettings {
             github_pat: "settings-token".into(),
             ..Default::default()
@@ -38,6 +43,7 @@ mod tests {
 
     #[test]
     fn env_used_when_settings_blank() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let settings = FrontendSettings::default();
         let prev = std::env::var(ENV_TOKEN).ok();
         unsafe { std::env::set_var(ENV_TOKEN, "  env-only  ") };

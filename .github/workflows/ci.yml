@@ -42,3 +42,8 @@ jobs:
       - name: Test
         # Default cargo test only — ignored ROM matrices stay opt-in (see header).
         run: cargo test
+      - name: Windows release GUI subsystem
+        if: runner.os == 'Windows'
+        run: |
+          cargo build --release --locked
+          python tools/check_pe_subsystem.py target/release/graycart.exe

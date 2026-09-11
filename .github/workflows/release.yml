@@ -51,6 +51,9 @@ jobs:
           fi
       - name: Release build
         run: cargo build --release --target ${{ matrix.target }} --locked
+      - name: Windows GUI subsystem (no console on Explorer launch)
+        if: runner.os == 'Windows'
+        run: python tools/check_pe_subsystem.py "target/${{ matrix.target }}/release/graycart.exe"
       - name: Pack artifact
         run: |
           set -euo pipefail
@@ -126,6 +129,10 @@ jobs:
               "Download the asset for your OS, verify the checksum if you like, "
               "then run the binary. Build-from-source remains "
               "`cargo run --release`.",
+              "",
+              "On Windows, the release `.exe` is a GUI-subsystem app (double-click "
+              "opens Graycart without a companion console). CLI/headless flags "
+              "still print when run from a terminal.",
               "",
           ]
           if match:
