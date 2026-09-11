@@ -208,13 +208,21 @@ fn try_file_bug(settings: &FrontendSettings, title: &str, body: &str) -> Result<
 }
 
 fn fallback_bug(ctx: &Context, body: &str) {
+    let _ = set_clipboard_text(body);
     ctx.copy_text(body.to_string());
     let _ = github::open_url(&bug_new_issue_url());
 }
 
 fn fallback_feature(ctx: &Context, body: &str) {
+    let _ = set_clipboard_text(body);
     ctx.copy_text(body.to_string());
     let _ = github::open_url(&feature_new_issue_url());
+}
+
+fn set_clipboard_text(text: &str) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut cb| cb.set_text(text.to_string()))
+        .map_err(|e| e.to_string())
 }
 
 /// Draw report dialogs. Returns consent outcome when a crash modal closes.
@@ -226,15 +234,16 @@ pub fn show(
     let mut outcome = ConsentOutcome::Open;
 
     if ui_state.token_dialog {
-        egui::Window::new("GitHub token")
+        egui::Window::new("Optional GitHub token")
             .collapsible(false)
             .resizable(true)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(
-                    "Paste a fine-grained personal access token with Issues read/write \
-                     on graycart/graycart-gb only. Stored in local settings (not shipped \
-                     in release binaries). You can also set GRAYCART_GITHUB_TOKEN.",
+                    "Optional. A fine-grained PAT with Issues read/write on graycart/graycart-gb \
+                     lets Send create the issue automatically. Without a token, Send still works: \
+                     it copies the report and opens GitHub’s new-issue form. Stored locally only \
+                     (never shipped in release binaries). Env: GRAYCART_GITHUB_TOKEN.",
                 );
                 ui.add(
                     egui::TextEdit::singleline(&mut ui_state.token_draft)
@@ -269,7 +278,11 @@ pub fn show(
             .resizable(true)
             .default_width(520.0)
             .show(ctx, |ui| {
-                ui.label("Review the details, then Send to create a GitHub issue with your token. Cancel leaves nothing filed.");
+                ui.label(
+                    "Review what will be sent. Send creates a GitHub issue when a token is \
+                     configured; otherwise it copies the report and opens the bug form in your browser. \
+                     Cancel leaves nothing filed.",
+                );
                 edit_bug_fields(ui, &mut state.fields);
                 if let Some(status) = &state.status {
                     ui.colored_label(egui::Color32::LIGHT_RED, status);
@@ -290,15 +303,17 @@ pub fn show(
                                     }
                                     Err(e) if e == "missing_token" => {
                                         fallback_bug(ctx, &body);
-                                        state.status = Some(
-                                            "No token configured — copied body and opened the bug form. Set a token under Help → GitHub token…".into(),
+                                        ui_state.last_status = Some(
+                                            "Opened GitHub bug form — report copied to clipboard (paste if needed). Token optional under Help → Optional GitHub token…".into(),
                                         );
+                                        request_close = true;
                                     }
                                     Err(e) => {
                                         fallback_bug(ctx, &body);
-                                        state.status = Some(format!(
-                                            "API failed ({e}). Copied body and opened the bug form."
+                                        ui_state.last_status = Some(format!(
+                                            "API failed ({e}). Opened GitHub — report on clipboard."
                                         ));
+                                        request_close = true;
                                     }
                                 }
                             }
@@ -327,7 +342,10 @@ pub fn show(
             .resizable(true)
             .default_width(480.0)
             .show(ctx, |ui| {
-                ui.label("Title + description only. Send creates a GitHub issue; Cancel files nothing.");
+                ui.label(
+                    "Title + description only. Send files with a token when configured; \
+                     otherwise copies the request and opens GitHub. Cancel files nothing.",
+                );
                 ui.label("Title");
                 ui.text_edit_singleline(&mut state.fields.title);
                 ui.label("Description");
@@ -355,15 +373,17 @@ pub fn show(
                                     }
                                     Err(e) if e == "missing_token" => {
                                         fallback_feature(ctx, &body);
-                                        state.status = Some(
-                                            "No token configured — copied body and opened the feature form. Set a token under Help → GitHub token…".into(),
+                                        ui_state.last_status = Some(
+                                            "Opened GitHub feature form — description copied to clipboard.".into(),
                                         );
+                                        request_close = true;
                                     }
                                     Err(e) => {
                                         fallback_feature(ctx, &body);
-                                        state.status = Some(format!(
-                                            "API failed ({e}). Copied body and opened the feature form."
+                                        ui_state.last_status = Some(format!(
+                                            "API failed ({e}). Opened GitHub — description on clipboard."
                                         ));
+                                        request_close = true;
                                     }
                                 }
                             }
@@ -437,15 +457,26 @@ pub fn show(
                             }
                             Err(e) if e == "missing_token" => {
                                 fallback_bug(ctx, &body);
-                                state.status = Some(
-                                    "No token configured — copied report and opened the bug form. Configure Help → GitHub token…".into(),
+                                if let Some(dir) = crash_dir() {
+                                    let _ = mark_consumed(&dir);
+                                }
+                                ui_state.last_status = Some(
+                                    "Opened GitHub bug form — crash report copied to clipboard."
+                                        .into(),
                                 );
+                                request_close = true;
+                                sent = true;
                             }
                             Err(e) => {
                                 fallback_bug(ctx, &body);
-                                state.status = Some(format!(
-                                    "API failed ({e}). Copied report and opened the bug form."
+                                if let Some(dir) = crash_dir() {
+                                    let _ = mark_consumed(&dir);
+                                }
+                                ui_state.last_status = Some(format!(
+                                    "API failed ({e}). Opened GitHub — report on clipboard."
                                 ));
+                                request_close = true;
+                                sent = true;
                             }
                         }
                     }

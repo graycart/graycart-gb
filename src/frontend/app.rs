@@ -187,6 +187,12 @@ fn exe_dir() -> Option<PathBuf> {
         .and_then(|p| p.parent().map(Path::to_path_buf))
 }
 
+fn set_clipboard_text(text: &str) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut cb| cb.set_text(text.to_string()))
+        .map_err(|e| e.to_string())
+}
+
 impl App {
     fn boot_mode(&self) -> BootMode {
         if self.settings.skip_boot {
@@ -741,29 +747,24 @@ impl App {
         eprintln!("debug: capture armed (−15s … +5s)");
     }
 
-    fn copy_text_to_clipboard(&self, label: &str, text: &str) {
-        #[cfg(target_os = "macos")]
-        {
-            use std::io::Write;
-            use std::process::{Command, Stdio};
-            if let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
-                if let Some(mut stdin) = child.stdin.take() {
-                    let _ = stdin.write_all(text.as_bytes());
-                }
-                let _ = child.wait();
-                eprintln!("debug: {label} copied to clipboard ({} bytes)", text.len());
-                return;
+    fn copy_text_to_clipboard(&mut self, label: &str, text: &str) {
+        match set_clipboard_text(text) {
+            Ok(()) => {
+                self.set_status_toast(format!(
+                    "Copied {label} to clipboard ({} bytes)",
+                    text.len()
+                ));
+            }
+            Err(e) => {
+                self.set_status_toast(format!("Clipboard copy failed ({e}) — use Save… instead"));
             }
         }
-        eprintln!(
-            "debug: {label} ready ({} bytes) — use SAVE… if clipboard unavailable",
-            text.len()
-        );
     }
 
     fn copy_report(&mut self) {
-        if let Some(report) = self.diagnostics.last_report.clone() {
-            self.copy_text_to_clipboard("report", &report);
+        match self.diagnostics.last_report.clone() {
+            Some(report) => self.copy_text_to_clipboard("report", &report),
+            None => self.set_status_toast("No capture report yet — arm Capture first".into()),
         }
     }
 
