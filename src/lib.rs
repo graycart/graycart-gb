@@ -38,7 +38,10 @@ pub use input::{GameBoyButton, Joypad, P1};
 pub use ppu::{
     Framebuffer, Ppu, SCREEN_HEIGHT, SCREEN_WIDTH, Shade, decode_tile_row, shade_from_bgp,
 };
-pub use save::{default_save_path, flush as flush_save, load as load_save};
+pub use save::{
+    default_save_path, flush as flush_save, graycart_saves_dir, legacy_sidecar_save_path,
+    load as load_save, load_with_fallback as load_save_with_fallback, save_path_in_dir,
+};
 pub use snapshot::{
     Gcs1Error, Gcs1Header, Gcs1Metadata, MachineStateV1, SNAPSHOT_FORMAT_VERSION, capture,
     decode_gcs1, encode_gcs1, restore, rom_sha256, sanitize_title,

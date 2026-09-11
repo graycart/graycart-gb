@@ -7,7 +7,7 @@ mod tests;
 
 pub use recent::RecentRom;
 
-use graycart::{Cartridge, default_save_path, load_save};
+use graycart::{Cartridge, default_save_path, legacy_sidecar_save_path, load_save_with_fallback};
 use std::path::{Path, PathBuf};
 
 /// Supported cartridge file extensions (no leading dot; case-insensitive at match time).
@@ -38,7 +38,8 @@ pub fn open_rom_file(path: &Path) -> Result<OpenedRom, String> {
         }
     };
     let save_path = default_save_path(path);
-    let _ = load_save(&save_path, &mut cart);
+    let legacy = legacy_sidecar_save_path(path);
+    let _ = load_save_with_fallback(&save_path, Some(&legacy), &mut cart);
     Ok(OpenedRom {
         path: path.to_path_buf(),
         save_path,

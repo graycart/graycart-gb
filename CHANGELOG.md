@@ -8,6 +8,13 @@ matching `.sha256` sidecar. Targets: `x86_64-unknown-linux-gnu`,
 Git tag `vX.Y.Z` must match `Cargo.toml` `[package].version` or the release
 workflow fails.
 
+## 0.11.3
+
+Battery `.sav` files default to the Graycart data `saves/` directory instead of
+beside the ROM. ROM-adjacent sidecars still load as a migration fallback;
+`--save` remains an explicit override. Flushes create the saves directory and
+do not dual-write.
+
 ## 0.11.2
 
 Public hardening A–G (docs, templates, fixture provenance, CI, release workflow,

@@ -1,6 +1,7 @@
 use super::*;
 use crate::cart::{Cartridge, Header};
 use std::fs;
+use std::path::PathBuf;
 
 const ROM_BANK: usize = 16 * 1024;
 
@@ -23,17 +24,115 @@ fn mbc3_ram_no_battery() -> Cartridge {
 }
 
 #[test]
-fn default_save_path_replaces_gb_extension() {
+fn save_path_in_dir_uses_stem_sav() {
     assert_eq!(
-        default_save_path("carts/pokemon_red.gb"),
-        PathBuf::from("carts/pokemon_red.sav")
+        save_path_in_dir("/data/Graycart/saves", "carts/pokemon_red.gb"),
+        PathBuf::from("/data/Graycart/saves/pokemon_red.sav")
     );
-    assert_eq!(default_save_path("game.GBC"), PathBuf::from("game.sav"));
+    assert_eq!(
+        save_path_in_dir("/data/Graycart/saves", "game.GBC"),
+        PathBuf::from("/data/Graycart/saves/game.sav")
+    );
+    assert_eq!(
+        save_path_in_dir("/data/Graycart/saves", "rom.bin"),
+        PathBuf::from("/data/Graycart/saves/rom.sav")
+    );
 }
 
 #[test]
-fn default_save_path_appends_when_no_gb_ext() {
-    assert_eq!(default_save_path("rom.bin"), PathBuf::from("rom.bin.sav"));
+fn legacy_sidecar_save_path_beside_rom() {
+    assert_eq!(
+        legacy_sidecar_save_path("carts/pokemon_red.gb"),
+        PathBuf::from("carts/pokemon_red.sav")
+    );
+    assert_eq!(
+        legacy_sidecar_save_path("game.GBC"),
+        PathBuf::from("game.sav")
+    );
+    assert_eq!(
+        legacy_sidecar_save_path("rom.bin"),
+        PathBuf::from("rom.bin.sav")
+    );
+}
+
+#[test]
+fn default_save_path_uses_graycart_saves_dir() {
+    let path = default_save_path("carts/pokemon_red.gb");
+    assert_eq!(
+        path.file_name().and_then(|n| n.to_str()),
+        Some("pokemon_red.sav")
+    );
+    assert_eq!(path.parent().map(PathBuf::from), Some(graycart_saves_dir()));
+    assert_ne!(path, PathBuf::from("carts/pokemon_red.sav"));
+}
+
+#[test]
+fn load_with_fallback_prefers_primary() {
+    let dir = tempfile::tempdir().unwrap();
+    let primary = dir.path().join("primary.sav");
+    let legacy = dir.path().join("legacy.sav");
+
+    let mut writer = mbc3_battery_cart();
+    writer.write8(0x0000, 0x0A);
+    writer.write8(0xA000, 0x11);
+    assert!(flush(&primary, &mut writer).unwrap());
+
+    let mut legacy_writer = mbc3_battery_cart();
+    legacy_writer.write8(0x0000, 0x0A);
+    legacy_writer.write8(0xA000, 0x22);
+    assert!(flush(&legacy, &mut legacy_writer).unwrap());
+
+    let mut cart = mbc3_battery_cart();
+    assert!(load_with_fallback(&primary, Some(&legacy), &mut cart).unwrap());
+    cart.write8(0x0000, 0x0A);
+    assert_eq!(cart.read8(0xA000), 0x11);
+}
+
+#[test]
+fn load_with_fallback_uses_legacy_when_primary_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let primary = dir.path().join("missing.sav");
+    let legacy = dir.path().join("legacy.sav");
+    let _ = fs::remove_file(&primary);
+
+    let mut writer = mbc3_battery_cart();
+    writer.write8(0x0000, 0x0A);
+    writer.write8(0xA000, 0x33);
+    assert!(flush(&legacy, &mut writer).unwrap());
+
+    let mut cart = mbc3_battery_cart();
+    assert!(load_with_fallback(&primary, Some(&legacy), &mut cart).unwrap());
+    cart.write8(0x0000, 0x0A);
+    assert_eq!(cart.read8(0xA000), 0x33);
+}
+
+#[test]
+fn load_with_fallback_skips_legacy_when_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let primary = dir.path().join("missing.sav");
+    let legacy = dir.path().join("legacy.sav");
+    let _ = fs::remove_file(&primary);
+
+    let mut writer = mbc3_battery_cart();
+    writer.write8(0x0000, 0x0A);
+    writer.write8(0xA000, 0x44);
+    assert!(flush(&legacy, &mut writer).unwrap());
+
+    let mut cart = mbc3_battery_cart();
+    assert!(!load_with_fallback(&primary, None, &mut cart).unwrap());
+}
+
+#[test]
+fn flush_creates_parent_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested").join("saves").join("test.sav");
+    assert!(!path.parent().unwrap().exists());
+
+    let mut cart = mbc3_battery_cart();
+    cart.write8(0x0000, 0x0A);
+    cart.write8(0xA000, 0x55);
+    assert!(flush(&path, &mut cart).unwrap());
+    assert!(path.is_file());
 }
 
 #[test]
@@ -46,10 +145,8 @@ fn load_missing_file_is_ok_false() {
 
 #[test]
 fn flush_and_reload_round_trip() {
-    let dir = std::env::temp_dir().join("graycart-save-roundtrip");
-    let _ = fs::create_dir_all(&dir);
-    let path = dir.join("test.sav");
-    let _ = fs::remove_file(&path);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.sav");
 
     let mut cart = mbc3_battery_cart();
     cart.write8(0x0000, 0x0A); // enable RAM
@@ -66,16 +163,12 @@ fn flush_and_reload_round_trip() {
     cart2.write8(0x0000, 0x0A);
     assert_eq!(cart2.read8(0xA000), 0x42);
     assert_eq!(cart2.read8(0xA001), 0x99);
-
-    let _ = fs::remove_file(&path);
 }
 
 #[test]
 fn non_battery_ram_is_not_persisted() {
-    let dir = std::env::temp_dir().join("graycart-save-nobatt");
-    let _ = fs::create_dir_all(&dir);
-    let path = dir.join("test.sav");
-    let _ = fs::remove_file(&path);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.sav");
 
     let mut cart = mbc3_ram_no_battery();
     assert!(!cart.has_battery_backed_ram());
@@ -89,10 +182,8 @@ fn non_battery_ram_is_not_persisted() {
 
 #[test]
 fn mbc3_timer_save_includes_rtc_trailer() {
-    let dir = std::env::temp_dir().join("graycart-save-rtc");
-    let _ = fs::create_dir_all(&dir);
-    let path = dir.join("test.sav");
-    let _ = fs::remove_file(&path);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.sav");
 
     let mut rom = vec![0xFF; 4 * ROM_BANK];
     rom[0x0147] = 0x10; // MBC3+TIMER+RAM+BATTERY
@@ -123,7 +214,6 @@ fn mbc3_timer_save_includes_rtc_trailer() {
     cart2.write8(0x4000, 0x08);
     let s = cart2.read8(0xA000);
     assert!(s == 0x07 || s == 0x08, "unexpected {s:#x}");
-    let _ = fs::remove_file(&path);
 }
 
 #[test]
