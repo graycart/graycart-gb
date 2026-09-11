@@ -11,9 +11,10 @@ struct ReadOnlyBootDir(PathBuf);
 #[cfg(unix)]
 impl ReadOnlyBootDir {
     fn new(path: &Path) -> Self {
+        use std::os::unix::fs::PermissionsExt;
         let boot_dir = path.parent().unwrap().to_path_buf();
         let mut perms = fs::metadata(&boot_dir).unwrap().permissions();
-        perms.set_readonly(true);
+        perms.set_mode(0o555);
         fs::set_permissions(&boot_dir, perms).unwrap();
         Self(boot_dir)
     }
@@ -22,8 +23,9 @@ impl ReadOnlyBootDir {
 #[cfg(unix)]
 impl Drop for ReadOnlyBootDir {
     fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(&self.0).unwrap().permissions();
-        perms.set_readonly(false);
+        perms.set_mode(0o755);
         fs::set_permissions(&self.0, perms).unwrap();
     }
 }

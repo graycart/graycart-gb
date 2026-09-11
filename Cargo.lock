@@ -1064,7 +1064,7 @@ dependencies = [
 
 [[package]]
 name = "graycart"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "core-foundation-sys",
  "coreaudio-sys",

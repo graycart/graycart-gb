@@ -4,7 +4,7 @@ DMG and Game Boy Color emulator. This repository is **`graycart-gb`** in the [Gr
 
 **CGB silicon is on** (`CGB_SILICON_READY`). Emulation → Hardware **Automatic** uses CGB hardware. You can still force original Game Boy or Game Boy Color.
 
-This is **0.11.0**, not 1.0.0. Playable CGB needs KEY1 + HDMA (landed). Packaging, trusted settings migration, and save/state compatibility are still open.
+This is **0.11.1**, not 1.0.0. Playable CGB needs KEY1 + HDMA (landed). Packaging, trusted settings migration, and save/state compatibility are still open.
 
 ## Status
 
