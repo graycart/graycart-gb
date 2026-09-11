@@ -8,6 +8,14 @@ matching `.sha256` sidecar. Targets: `x86_64-unknown-linux-gnu`,
 Git tag `vX.Y.Z` must match `Cargo.toml` `[package].version` or the release
 workflow fails.
 
+## Unreleased
+
+- Audio: map stereo PCM into multi-channel WASAPI frames (L/R + silence) instead of
+  draining one ring sample per host channel — fixes choppy/robotic output on
+  surround defaults such as Logitech PRO X 2 LIGHTSPEED. Prefer stereo/mono when
+  negotiating configs; request ~20 ms device periods when honored; raise the soft
+  queue target to ~4 display frames.
+
 ## 0.11.3
 
 Post-`v0.11.2` host fixes:
