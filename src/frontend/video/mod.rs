@@ -140,20 +140,20 @@ impl Renderer {
     }
 }
 
-/// Default window attributes for a scaled 160×144 LCD plus menu bar chrome.
+/// Default window attributes for a scaled 160×144 LCD plus menu/toolbar/status chrome.
 pub fn window_attributes(title: &str) -> winit::window::WindowAttributes {
-    // ~28 logical px reserves room so the 4× game area sits fully below the menu.
-    const MENU_CHROME: f64 = 28.0;
+    // Must match `ui::theme::CHROME_HEIGHT` (menu + toolbar + status).
+    const CHROME_HEIGHT: f64 = 72.0;
     let size = LogicalSize::new(
         (SCREEN_WIDTH as u32 * SCALE) as f64,
-        (SCREEN_HEIGHT as u32 * SCALE) as f64 + MENU_CHROME,
+        (SCREEN_HEIGHT as u32 * SCALE) as f64 + CHROME_HEIGHT,
     );
     Window::default_attributes()
         .with_title(title)
         .with_inner_size(size)
         .with_min_inner_size(LogicalSize::new(
             SCREEN_WIDTH as f64,
-            SCREEN_HEIGHT as f64 + MENU_CHROME,
+            SCREEN_HEIGHT as f64 + CHROME_HEIGHT,
         ))
         .with_resizable(true)
 }

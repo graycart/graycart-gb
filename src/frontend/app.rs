@@ -281,6 +281,9 @@ impl App {
     fn sync_status_toast(&mut self) {
         if let Some(g) = self.gui.as_mut() {
             g.runtime.status_toast = self.status_toast.clone();
+            g.runtime.rom_title = self.cached_title.clone();
+            g.runtime.host_fps = self.last_host_fps;
+            g.runtime.emu_fps = self.runtime_emu_fps;
         }
         if let Some(until) = self.status_toast_until
             && Instant::now() >= until
@@ -907,6 +910,12 @@ impl App {
                     self.settings.ff_speed = preset;
                     self.settings.save();
                     self.runtime.send(EmuCommand::SetFfSpeed(preset));
+                }
+                UiAction::SetFfToggle(enabled) => {
+                    if let Some(g) = self.gui.as_mut() {
+                        g.runtime.ff_toggle = enabled;
+                    }
+                    self.runtime.send(EmuCommand::SetFfToggle(enabled));
                 }
                 UiAction::SetHardwarePref(pref) => {
                     self.settings.hardware_pref = pref;

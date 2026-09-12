@@ -124,10 +124,7 @@ impl DebugMonitor {
         let scale = window.scale_factor() as f32;
         let egui_ctx = Context::default();
         install_departure_mono(&egui_ctx);
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = egui::Color32::from_rgb(12, 14, 16);
-        visuals.window_fill = egui::Color32::from_rgb(12, 14, 16);
-        egui_ctx.set_visuals(visuals);
+        crate::frontend::ui::theme::apply_graycart_theme(&egui_ctx);
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
             ViewportId::from_hash_of("debug_monitor"),
