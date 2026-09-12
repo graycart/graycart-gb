@@ -29,6 +29,7 @@ pub enum UiAction {
     InstallBootRom,
     ClearBootRom,
     SetFfSpeed(SpeedPreset),
+    SetFfToggle(bool),
     SetHardwarePref(graycart::HostHardwarePref),
     SetAudioOutput(crate::frontend::audio::AudioDevicePref),
     ReportBug,
@@ -45,6 +46,12 @@ pub struct RuntimeUi {
     pub debug_monitor_open: bool,
     pub controls_open: bool,
     pub status_toast: Option<String>,
+    /// ROM title for the status bar (synced from the host App).
+    pub rom_title: String,
+    /// Host present FPS (synced from frame packets).
+    pub host_fps: f64,
+    /// Emulation-thread FPS (synced from frame packets).
+    pub emu_fps: f64,
     /// Playback overlay (egui chrome; excluded from F6 screenshots).
     pub overlay_rewinding: bool,
     pub overlay_paused: bool,
@@ -143,7 +150,12 @@ pub fn menu_bar(
                 {
                     settings.save();
                 }
-                ui.checkbox(&mut runtime.ff_toggle, "Fast Forward");
+                if ui
+                    .checkbox(&mut runtime.ff_toggle, "Fast Forward")
+                    .changed()
+                {
+                    actions.push(UiAction::SetFfToggle(runtime.ff_toggle));
+                }
                 ui.menu_button("Speed", |ui| {
                     for preset in SpeedPreset::ALL {
                         let selected = settings.ff_speed == preset;
@@ -308,14 +320,6 @@ pub fn menu_bar(
                 ui.close();
             }
         });
-
-        if runtime.paused {
-            ui.separator();
-            ui.label("Paused");
-        }
-        if let Some(msg) = &runtime.status_toast {
-            ui.separator();
-            ui.label(msg);
-        }
+        // Pause / toast live on the bottom status bar (Slice 1 chrome).
     });
 }

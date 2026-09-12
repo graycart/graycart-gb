@@ -1,9 +1,13 @@
 //! Phase 9 — thin egui shell over the pixels presenter.
+//! Issue #12 Slice 1: dark chrome theme + toolbar + status bar around the canvas.
 
 pub(crate) mod input_config;
 mod menu;
 mod palette_editor;
 mod rom_picker;
+mod status;
+pub(crate) mod theme;
+mod toolbar;
 
 use egui::{
     ClippedPrimitive, ColorImage, Context, TextureHandle, TextureOptions, TexturesDelta, ViewportId,
@@ -13,6 +17,9 @@ use menu::{RuntimeUi, menu_bar};
 use palette_editor::palette_editor_window;
 use pixels::{PixelsContext, wgpu};
 use rom_picker::empty_rom_screen;
+use status::status_bar;
+use theme::{EXTREME_BG, PANEL_FILL, apply_graycart_theme};
+use toolbar::toolbar;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
@@ -51,6 +58,7 @@ impl Gui {
         let max_texture_size = pixels.device().limits().max_texture_dimension_2d as usize;
         let egui_ctx = Context::default();
         install_departure_mono(&egui_ctx);
+        apply_graycart_theme(&egui_ctx);
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
             ViewportId::ROOT,
@@ -120,7 +128,7 @@ impl Gui {
     }
 
     /// Prepare egui. `game_rgba` is the post-palette/effects 160×144 frame (or `None` when empty).
-    /// The game image is laid out in the central panel **below** the menu bar.
+    /// Layout: menu → toolbar → central canvas → status bar.
     pub fn prepare(
         &mut self,
         window: &Window,
@@ -137,17 +145,40 @@ impl Gui {
         let rom_loaded = runtime.rom_loaded;
         let integer_scaling = settings.integer_scaling;
         let display_mode = settings.display_mode;
+        let hardware_pref = settings.hardware_pref;
+        let ff_speed = settings.ff_speed;
         let game_tex = self.game_texture.clone();
+
+        let chrome_frame = egui::Frame::NONE
+            .fill(PANEL_FILL)
+            .inner_margin(egui::Margin::symmetric(4, 2));
 
         let output = self.egui_ctx.run_ui(raw_input, |ui| {
             egui::Panel::top("menu_bar")
                 .resizable(false)
+                .frame(chrome_frame)
                 .show_inside(ui, |ui| {
                     menu_bar(ui, settings, &mut runtime, &mut actions);
                 });
 
+            egui::Panel::top("toolbar")
+                .resizable(false)
+                .exact_size(28.0)
+                .frame(chrome_frame)
+                .show_inside(ui, |ui| {
+                    toolbar(ui, &mut runtime, &mut actions);
+                });
+
+            egui::Panel::bottom("status_bar")
+                .resizable(false)
+                .exact_size(22.0)
+                .frame(chrome_frame)
+                .show_inside(ui, |ui| {
+                    status_bar(ui, &runtime, hardware_pref, ff_speed);
+                });
+
             egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
+                .frame(egui::Frame::NONE.fill(EXTREME_BG))
                 .show_inside(ui, |ui| {
                     if let Some(tex) = game_tex.as_ref() {
                         let avail = ui.available_size();
@@ -280,8 +311,9 @@ fn playback_overlay(ctx: &Context, runtime: &RuntimeUi) {
         return;
     }
 
+    // Offset below compact menu + toolbar chrome.
     egui::Area::new(egui::Id::new("playback_overlay"))
-        .anchor(egui::Align2::LEFT_TOP, egui::vec2(12.0, 36.0))
+        .anchor(egui::Align2::LEFT_TOP, egui::vec2(12.0, 56.0))
         .interactable(false)
         .show(ctx, |ui| {
             ui.label(
