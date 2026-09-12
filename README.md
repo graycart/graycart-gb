@@ -8,6 +8,8 @@ Version **0.11.5** — not 1.0. KEY1 and HDMA are in for playable CGB. Packaging
 
 ## Status
 
+**Daily play host:** prefer [graycart-gba](https://github.com/graycart/graycart-gba) for new **DMG/CGB and GBA** play (P12 supersede cutover). This repo remains the **`graycart` library** and a maintenance / development host for SM83 cores — the app leaves daily-target status; the library stays intentional.
+
 - **DMG:** playable. Blargg `cpu_instrs` and `dmg_sound` are the CPU/APU accuracy gates.
 - **CGB:** palettes, attributes, priority, double-speed, GDMA/HDMA, CGB boot mapping.
 - **Mappers:** MBC0 / MBC1 / MBC2 / MBC3 (+ RTC) / MBC5. Unsupported cartridge types fail loudly instead of pretending to be ROM-only.
