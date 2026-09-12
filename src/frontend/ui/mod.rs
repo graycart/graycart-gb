@@ -154,14 +154,18 @@ impl Gui {
             .inner_margin(egui::Margin::symmetric(4, 2));
 
         let output = self.egui_ctx.run_ui(raw_input, |ui| {
-            egui::Panel::top("menu_bar")
+            // Menu + toolbar share one top chrome strip.
+            // Default top-panel height is only interact_size.y (~22); without an
+            // explicit size the second row was clipped/lost under tight chrome.
+            // Compact menu row + toolbar row (Aseprite-like).
+            egui::Panel::top("chrome_menu")
                 .resizable(false)
+                .exact_size(24.0)
                 .frame(chrome_frame)
                 .show_inside(ui, |ui| {
                     menu_bar(ui, settings, &mut runtime, &mut actions);
                 });
-
-            egui::Panel::top("toolbar")
+            egui::Panel::top("chrome_toolbar")
                 .resizable(false)
                 .exact_size(28.0)
                 .frame(chrome_frame)

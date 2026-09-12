@@ -56,21 +56,21 @@ pub fn status_bar(
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(6.0);
-            let fps = if runtime.host_fps > 0.0 {
-                format!("{:.0} FPS", runtime.host_fps)
-            } else if runtime.emu_fps > 0.0 {
-                format!("{:.0} FPS", runtime.emu_fps)
-            } else {
-                "— FPS".to_string()
+            let fps = sane_fps(runtime.host_fps).or_else(|| sane_fps(runtime.emu_fps));
+            let fps_label = match fps {
+                Some(v) => format!("{v:.0} FPS"),
+                None => "— FPS".to_string(),
             };
             ui.label(
-                RichText::new(fps)
+                RichText::new(fps_label)
                     .color(Color32::from_rgb(170, 178, 190))
                     .size(12.0),
             );
-            if runtime.emu_fps > 0.0 && runtime.host_fps > 0.0 {
+            if let (Some(host), Some(emu)) = (sane_fps(runtime.host_fps), sane_fps(runtime.emu_fps))
+            {
+                let _ = host;
                 ui.label(
-                    RichText::new(format!("emu {:.0}", runtime.emu_fps))
+                    RichText::new(format!("emu {emu:.0}"))
                         .color(Color32::from_rgb(120, 128, 140))
                         .size(11.0),
                 );
@@ -104,4 +104,8 @@ fn playback_label(runtime: &RuntimeUi, ff_speed: SpeedPreset) -> String {
 fn status_dot(ui: &mut Ui, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
     ui.painter().circle_filled(rect.center(), 3.0, color);
+}
+
+fn sane_fps(fps: f64) -> Option<f64> {
+    (1.0..=999.0).contains(&fps).then_some(fps)
 }

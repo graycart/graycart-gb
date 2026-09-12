@@ -79,7 +79,11 @@ pub fn menu_bar(
     runtime: &mut RuntimeUi,
     actions: &mut Vec<UiAction>,
 ) {
-    egui::MenuBar::new().ui(ui, |ui| {
+    // Plain horizontal row (not MenuBar wrapper): under custom Visuals the
+    // egui MenuBar path was allocating zero height and painting nothing.
+    ui.horizontal(|ui| {
+        ui.set_min_height(20.0);
+        ui.spacing_mut().item_spacing.x = 2.0;
         ui.menu_button("File", |ui| {
             if ui.button("Open ROM…").clicked() {
                 actions.push(UiAction::OpenRomDialog);
